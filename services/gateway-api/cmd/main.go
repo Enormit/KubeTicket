@@ -48,16 +48,20 @@ func main() {
 	pgRepo := repo.NewPostgresRepo(pool)
 	authSvc := service.NewAuthService(pgRepo, cfg.JWTSecret, cfg.JWTExpiresIn)
 	eventSvc := service.NewEventService(pgRepo, rdb)
+	ticketSvc := service.NewTicketService(pgRepo, cfg.TicketQRHMACSecret, 24*time.Hour)
+	adminSvc := service.NewAdminService(pgRepo, ticketSvc)
 
 	router := handler.NewRouter(handler.RouterDeps{
-		Config:       cfg,
-		Logger:       logger,
-		Tracer:       tracer,
-		Metrics:      metrics,
-		Pool:         pool,
-		Redis:        rdb,
-		AuthHandler:  handler.NewAuthHandler(authSvc, cfg.JWTExpiresIn, cfg.CookieSecure),
-		EventHandler: handler.NewEventHandler(eventSvc),
+		Config:        cfg,
+		Logger:        logger,
+		Tracer:        tracer,
+		Metrics:       metrics,
+		Pool:          pool,
+		Redis:         rdb,
+		AuthHandler:   handler.NewAuthHandler(authSvc, cfg.JWTExpiresIn, cfg.CookieSecure),
+		EventHandler:  handler.NewEventHandler(eventSvc),
+		TicketHandler: handler.NewTicketHandler(ticketSvc),
+		AdminHandler:  handler.NewAdminHandler(adminSvc),
 	})
 
 	srv := &http.Server{

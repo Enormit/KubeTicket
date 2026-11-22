@@ -17,14 +17,16 @@ import (
 
 // RouterDeps aggregates dependencies required to mount gateway-api HTTP routes.
 type RouterDeps struct {
-	Config       *config.Config
-	Logger       *slog.Logger
-	Tracer       trace.Tracer
-	Metrics      *observability.Metrics
-	Pool         *pgxpool.Pool
-	Redis        redis.UniversalClient
-	AuthHandler  *AuthHandler
-	EventHandler *EventHandler
+	Config        *config.Config
+	Logger        *slog.Logger
+	Tracer        trace.Tracer
+	Metrics       *observability.Metrics
+	Pool          *pgxpool.Pool
+	Redis         redis.UniversalClient
+	AuthHandler   *AuthHandler
+	EventHandler  *EventHandler
+	TicketHandler *TicketHandler
+	AdminHandler  *AdminHandler
 }
 
 // NewRouter constructs the chi HTTP router with observability, CORS, auth, and route handlers.
@@ -77,6 +79,23 @@ func NewRouter(d RouterDeps) http.Handler {
 			ev.Get("/", d.EventHandler.ListEvents)
 			ev.Get("/{id}", d.EventHandler.GetEvent)
 			ev.Get("/{id}/seats/snapshot", d.EventHandler.GetSeatSnapshot)
+		})
+
+		api.Group(func(authed chi.Router) {
+			authed.Use(middleware.JWTAuth(d.Config.JWTSecret))
+			if d.TicketHandler != nil {
+				authed.Get("/orders", d.TicketHandler.ListOrders)
+				authed.Get("/tickets", d.TicketHandler.ListTickets)
+				authed.Get("/tickets/{id}/qr", d.TicketHandler.GetTicketQR)
+			}
+
+			if d.AdminHandler != nil {
+				authed.Route("/admin", func(adm chi.Router) {
+					adm.Use(middleware.RequireRole("ADMIN"))
+					adm.Post("/events", d.AdminHandler.CreateEvent)
+					adm.Post("/checkin", d.AdminHandler.Checkin)
+				})
+			}
 		})
 	})
 
