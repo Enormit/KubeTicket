@@ -2,4 +2,5 @@ go 1.27.4
 
 use (
 	./pkg
+	./gateway-api
 )

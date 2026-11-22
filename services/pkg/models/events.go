@@ -1,6 +1,43 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// SeatLockRecord is the compact pipe-delimited value stored in Redis under seat:lock:<event>:<seat>.
+// Format: "<STATUS>|<USER_ID>|<REF_ID>|<EXPIRES_UNIX_MS>"
+type SeatLockRecord struct {
+	Status        string
+	UserID        string
+	RefID         string // hold_token when HELD, order_id when CHECKOUT/SOLD
+	ExpiresUnixMs int64
+}
+
+// Encode serializes SeatLockRecord for Redis storage (Lua-compatible).
+func (r SeatLockRecord) Encode() string {
+	return fmt.Sprintf("%s|%s|%s|%d", r.Status, r.UserID, r.RefID, r.ExpiresUnixMs)
+}
+
+// ParseSeatLockRecord decodes a pipe-delimited Redis lock value.
+func ParseSeatLockRecord(raw string) (SeatLockRecord, bool) {
+	parts := strings.Split(raw, "|")
+	if len(parts) < 4 {
+		return SeatLockRecord{}, false
+	}
+	expMs, err := strconv.ParseInt(parts[3], 10, 64)
+	if err != nil {
+		expMs = 0
+	}
+	return SeatLockRecord{
+		Status:        parts[0],
+		UserID:        parts[1],
+		RefID:         parts[2],
+		ExpiresUnixMs: expMs,
+	}, true
+}
 
 // SeatDelta captures a single seat state transition broadcast over WebSocket.
 type SeatDelta struct {
