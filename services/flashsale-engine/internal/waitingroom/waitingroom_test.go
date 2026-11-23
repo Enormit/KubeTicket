@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Enormit/kubeticket/services/pkg/middleware"
+	"github.com/Enormit/kubeticket/services/pkg/models"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
@@ -94,5 +99,59 @@ func TestWaitingRoomHTTPHandlerRejectsBot(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["error"] != "anti_bot_failed" {
 		t.Fatalf("unexpected error body: %v", body)
+	}
+}
+
+func TestWaitingRoomConcurrentPodsRespectAdmissionRateAndCapacity(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer rdb.Close()
+
+	ctx := context.Background()
+	eventID := "ev-scale"
+	qKey := models.RedisWaitingQueueKey(eventID)
+
+	// Enqueue 30 users directly in waiting room queue.
+	members := make([]redis.Z, 0, 30)
+	for i := 0; i < 30; i++ {
+		members = append(members, redis.Z{Score: float64(i + 1), Member: fmt.Sprintf("user-%02d", i)})
+	}
+	if err := rdb.ZAdd(ctx, qKey, members...).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Align start away from a second rollover so all 20 concurrent calls hit the same 1s rate window.
+	if rem := time.Second - time.Duration(time.Now().Nanosecond()); rem < 200*time.Millisecond {
+		time.Sleep(rem + 20*time.Millisecond)
+	}
+
+	// Simulate 20 replicated Pods firing AdmitBatch concurrently with rate=5/sec and maxActive=20.
+	const pods = 20
+	var totalAdmitted atomic.Int64
+	var wg sync.WaitGroup
+	for p := 0; p < pods; p++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			podSvc := NewService(rdb, stubVerifier{}, "wr-secret", 5)
+			n, err := podSvc.AdmitBatch(ctx, eventID)
+			if err != nil {
+				t.Errorf("AdmitBatch error: %v", err)
+				return
+			}
+			totalAdmitted.Add(int64(n))
+		}()
+	}
+	wg.Wait()
+
+	if got := totalAdmitted.Load(); got > 5 || got == 0 {
+		t.Fatalf("expected 1..5 users admitted in 1s window across %d Pods, got %d", pods, got)
+	}
+	remaining, err := rdb.ZCard(ctx, qKey).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 30-totalAdmitted.Load() {
+		t.Fatalf("expected %d remaining in queue, got %d", 30-totalAdmitted.Load(), remaining)
 	}
 }

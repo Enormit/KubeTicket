@@ -165,6 +165,18 @@ func RedisWaitingActiveCheckoutKey(eventID string) string {
 	return fmt.Sprintf("wr:active:%s", eventID)
 }
 
+func RedisWaitingAdmitLockKey(eventID string) string {
+	return fmt.Sprintf("lock:wr:admit:%s", eventID)
+}
+
+func RedisWaitingLoopLockKey(eventID string) string {
+	return fmt.Sprintf("lock:wr:loop:%s", eventID)
+}
+
+func RedisWaitingAdmitWindowKey(eventID string, unixSec int64) string {
+	return fmt.Sprintf("wr:admit:win:%s:%d", eventID, unixSec)
+}
+
 func RedisOrderStreamKey() string {
 	return "orders:stream"
 }

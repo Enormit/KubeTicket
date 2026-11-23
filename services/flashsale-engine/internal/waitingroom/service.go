@@ -20,6 +20,7 @@ var (
 	ErrTurnstileFailed   = errors.New("human verification failed")
 	ErrNotInWaitingRoom  = errors.New("user has not joined waiting room")
 	ErrAdmissionRequired = errors.New("valid waiting room admission token required")
+	releaseAdmitLockLua  = redis.NewScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
 )
 
 // TurnstileVerifier verifies anti-bot tokens (Cloudflare Turnstile / hCaptcha).
@@ -99,12 +100,13 @@ type storedToken struct {
 
 // Service manages fair FIFO queueing, anti-bot checks, and bound admission tokens.
 type Service struct {
-	rdb              redis.UniversalClient
-	verifier         TurnstileVerifier
-	tokenSecret      string
-	admissionRate    int
-	maxActiveUsers   int64
-	tokenTTL         time.Duration
+	rdb            redis.UniversalClient
+	verifier       TurnstileVerifier
+	tokenSecret    string
+	admissionRate  int
+	maxActiveUsers int64
+	tokenTTL       time.Duration
+	instanceID     string
 }
 
 // NewService creates a waiting room service.
@@ -119,6 +121,7 @@ func NewService(rdb redis.UniversalClient, verifier TurnstileVerifier, tokenSecr
 		admissionRate:  admissionRate,
 		maxActiveUsers: int64(admissionRate * 10),
 		tokenTTL:       10 * time.Minute,
+		instanceID:     uuid.NewString(),
 	}
 }
 
@@ -205,10 +208,34 @@ func (s *Service) Status(ctx context.Context, userID, eventID string) (*QueueSta
 	}, nil
 }
 
-// AdmitBatch pops eligible users from the front of the waiting queue based on active capacity.
+// AdmitBatch pops eligible users from the front of the waiting queue under a distributed
+// Redis mutex and shared per-second admission budget so scaled Pods cannot over-admit.
 func (s *Service) AdmitBatch(ctx context.Context, eventID string) (int, error) {
+	lockKey := models.RedisWaitingAdmitLockKey(eventID)
+	lockVal := s.instanceID + ":" + uuid.NewString()
+	acquired, err := s.rdb.SetNX(ctx, lockKey, lockVal, 5*time.Second).Result()
+	if err != nil || !acquired {
+		return 0, err
+	}
+	defer func() {
+		relCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_ = releaseAdmitLockLua.Run(relCtx, s.rdb, []string{lockKey}, lockVal).Err()
+	}()
+
+	now := time.Now()
+	winKey := models.RedisWaitingAdmitWindowKey(eventID, now.Unix())
+	usedThisSec, err := s.rdb.Get(ctx, winKey).Int64()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return 0, err
+	}
+	rateRemaining := int64(s.admissionRate) - usedThisSec
+	if rateRemaining <= 0 {
+		return 0, nil
+	}
+
 	activeKey := models.RedisWaitingActiveCheckoutKey(eventID)
-	nowMs := float64(time.Now().UnixMilli())
+	nowMs := float64(now.UnixMilli())
 	_ = s.rdb.ZRemRangeByScore(ctx, activeKey, "-inf", fmt.Sprintf("%f", nowMs)).Err()
 
 	activeCount, err := s.rdb.ZCard(ctx, activeKey).Result()
@@ -219,7 +246,7 @@ func (s *Service) AdmitBatch(ctx context.Context, eventID string) (int, error) {
 	if slots <= 0 {
 		return 0, nil
 	}
-	batchSize := min(int64(s.admissionRate), slots)
+	batchSize := min(rateRemaining, slots)
 
 	qKey := models.RedisWaitingQueueKey(eventID)
 	popped, err := s.rdb.ZPopMin(ctx, qKey, batchSize).Result()
@@ -244,6 +271,8 @@ func (s *Service) AdmitBatch(ctx context.Context, eventID string) (int, error) {
 		pipe := s.rdb.TxPipeline()
 		pipe.HSet(ctx, tKey, uid, encoded)
 		pipe.ZAdd(ctx, activeKey, redis.Z{Score: float64(exp.UnixMilli()), Member: uid})
+		pipe.IncrBy(ctx, winKey, 1)
+		pipe.Expire(ctx, winKey, 2*time.Second)
 		if _, err := pipe.Exec(ctx); err == nil {
 			admitted++
 		}
@@ -251,7 +280,7 @@ func (s *Service) AdmitBatch(ctx context.Context, eventID string) (int, error) {
 	return admitted, nil
 }
 
-// RunAdmissionLoop periodically admits queued users across active events.
+// RunAdmissionLoop periodically admits queued users across active events using a per-event leader lock.
 func (s *Service) RunAdmissionLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = time.Second
@@ -269,6 +298,10 @@ func (s *Service) RunAdmissionLoop(ctx context.Context, interval time.Duration) 
 				continue
 			}
 			for _, evID := range events {
+				acquired, err := s.rdb.SetNX(ctx, models.RedisWaitingLoopLockKey(evID), s.instanceID, 900*time.Millisecond).Result()
+				if err != nil || !acquired {
+					continue
+				}
 				_, _ = s.AdmitBatch(ctx, evID)
 			}
 		}

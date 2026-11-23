@@ -169,3 +169,31 @@ func TestHydrateFromPostgresIntegration(t *testing.T) {
 		t.Fatalf("expected IsHydrated() == true")
 	}
 }
+
+func TestSQSMessageGroupIDSharding(t *testing.T) {
+	eventID := "11111111-1111-1111-1111-111111111101"
+
+	// Empty OrderID falls back to EventID.
+	if got := SQSMessageGroupID(models.OrderQueueMessage{EventID: eventID}); got != eventID {
+		t.Fatalf("expected fallback %q, got %q", eventID, got)
+	}
+
+	// Same OrderID is deterministic across retries.
+	m1 := models.OrderQueueMessage{EventID: eventID, OrderID: "ord-fixed-123"}
+	if a, b := SQSMessageGroupID(m1), SQSMessageGroupID(m1); a != b || a == eventID {
+		t.Fatalf("expected stable sharded group id, got a=%q b=%q", a, b)
+	}
+
+	// Distinct orders for the same event spread across multiple FIFO groups for parallel worker consumption.
+	groups := make(map[string]struct{})
+	for i := 0; i < 40; i++ {
+		gid := SQSMessageGroupID(models.OrderQueueMessage{
+			EventID: eventID,
+			OrderID: fmt.Sprintf("order-%d", i),
+		})
+		groups[gid] = struct{}{}
+	}
+	if len(groups) < 10 {
+		t.Fatalf("expected orders to fan out across >=10 FIFO shards, got %d", len(groups))
+	}
+}

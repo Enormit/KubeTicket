@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 
 	"github.com/Enormit/kubeticket/services/pkg/models"
 	"github.com/Enormit/kubeticket/services/pkg/observability"
@@ -67,6 +68,19 @@ func NewSQSFIFOPublisher(ctx context.Context, region, queueURL string) (*SQSFIFO
 	}, nil
 }
 
+const sqsFIFOShardCount = 64
+
+// SQSMessageGroupID shards FIFO order processing across 64 deterministic groups per event
+// so KEDA-scaled order-worker Pods process independent orders concurrently.
+func SQSMessageGroupID(msg models.OrderQueueMessage) string {
+	if msg.OrderID == "" {
+		return msg.EventID
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(msg.OrderID))
+	return fmt.Sprintf("%s:%02d", msg.EventID, h.Sum32()%sqsFIFOShardCount)
+}
+
 func (p *SQSFIFOPublisher) PublishOrder(ctx context.Context, msg models.OrderQueueMessage) error {
 	attrs := observability.InjectTraceContext(ctx)
 	if tp := attrs["traceparent"]; tp != "" {
@@ -88,7 +102,7 @@ func (p *SQSFIFOPublisher) PublishOrder(ctx context.Context, msg models.OrderQue
 	_, err = p.client.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:               aws.String(p.queueURL),
 		MessageBody:            aws.String(string(raw)),
-		MessageGroupId:         aws.String(msg.EventID),
+		MessageGroupId:         aws.String(SQSMessageGroupID(msg)),
 		MessageDeduplicationId: aws.String(msg.OrderID),
 		MessageAttributes:      msgAttrs,
 	})
