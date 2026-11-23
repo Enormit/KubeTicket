@@ -208,7 +208,7 @@ func (r *PostgresRepo) CreateEvent(ctx context.Context, in CreateEventInput) (*m
 	zones := make([]models.Zone, 0, len(in.Zones))
 	const zoneQ = `
 		INSERT INTO zones (event_id, code, name, price_cents, currency, color, svg_bounds)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::jsonb)
 		RETURNING id::text, event_id::text, code, name, price_cents, currency, color`
 
 	for _, zIn := range in.Zones {
@@ -226,7 +226,7 @@ func (r *PostgresRepo) CreateEvent(ctx context.Context, in CreateEventInput) (*m
 		}
 		var z models.Zone
 		if err := tx.QueryRow(ctx, zoneQ,
-			ev.ID, zIn.Code, zIn.Name, zIn.PriceCents, currency, color, boundsBytes,
+			ev.ID, zIn.Code, zIn.Name, zIn.PriceCents, currency, color, string(boundsBytes),
 		).Scan(&z.ID, &z.EventID, &z.Code, &z.Name, &z.PriceCents, &z.Currency, &z.Color); err != nil {
 			return nil, nil, err
 		}
