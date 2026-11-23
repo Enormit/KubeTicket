@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import QRCode from "qrcode";
 import { Copy, QrCode, Ticket as TicketIcon } from "lucide-react";
 import { api, APIError } from "@/lib/api";
@@ -32,8 +33,9 @@ export default function MyTicketsPage() {
             try {
               const qr = await api.tickets.getQR(t.id);
               const dataUrl = await QRCode.toDataURL(qr.qr_token, {
-                width: 220,
+                width: 240,
                 margin: 1,
+                color: { dark: "#121212", light: "#FFFFFF" },
               });
               return {
                 ticket: t,
@@ -69,88 +71,115 @@ export default function MyTicketsPage() {
       setCopiedId(ticketId);
       setTimeout(() => setCopiedId(null), 1500);
     } catch {
-      // Ignore clipboard failure
+      // Ignore clipboard failures
     }
   };
 
   if (loading) {
     return (
-      <div className="h-64 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/60" />
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {[1, 2, 3].map((n) => (
+          <div
+            key={n}
+            className="h-72 animate-pulse rounded-[4px] border-2 border-kt-rule bg-kt-surface"
+          />
+        ))}
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <TicketIcon className="h-6 w-6 text-indigo-400" />
-        <h1 className="text-2xl font-bold text-white">Vé điện tử của tôi</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-kt-ink pb-4">
+        <div className="flex items-center gap-2.5">
+          <TicketIcon className="h-6 w-6 text-kt-ink" />
+          <h1 className="font-display text-4xl font-extrabold uppercase tracking-tight text-kt-ink">
+            Ví vé điện tử QR
+          </h1>
+        </div>
+        <span className="font-mono text-xs font-bold uppercase text-kt-muted kt-tabular">
+          {items.length} vé đã phát hành
+        </span>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-4 text-sm text-rose-200">
+        <div
+          role="alert"
+          className="rounded-[3px] border-2 border-kt-danger bg-kt-surface p-4 text-sm font-medium text-kt-danger"
+        >
           {error}
         </div>
       )}
 
       {items.length === 0 ? (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-8 text-center text-slate-400">
-          Bạn chưa có vé nào. Hãy chọn một sự kiện để đặt chỗ.
+        <div className="kt-card p-10 text-center">
+          <p className="text-sm font-medium text-kt-muted">
+            Bạn chưa sở hữu vé nào. Chọn sự kiện đang mở để bắt đầu đặt chỗ.
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-block rounded-[3px] border-2 border-kt-ink bg-kt-accent px-5 py-2.5 text-xs font-extrabold uppercase text-kt-ink hover:bg-kt-ink hover:text-kt-surface"
+          >
+            Xem lịch sự kiện
+          </Link>
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {items.map(({ ticket, qrToken, qrDataUrl }) => (
             <article
               key={ticket.id}
-              className="flex flex-col justify-between rounded-2xl border border-slate-800 bg-slate-900/80 p-6"
+              className="kt-card flex flex-col justify-between overflow-hidden"
             >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-slate-400">
+              <div className="space-y-3 p-5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-bold text-kt-muted">
                     {ticket.ticket_code}
                   </span>
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    className={`rounded-[2px] px-2.5 py-0.5 font-mono text-[11px] font-bold uppercase ${
                       ticket.status === "PAID"
-                        ? "bg-emerald-500/15 text-emerald-300"
+                        ? "bg-kt-emerald text-white"
                         : ticket.status === "CHECKED_IN"
-                          ? "bg-sky-500/15 text-sky-300"
-                          : "bg-amber-500/15 text-amber-300"
+                          ? "bg-kt-ink text-kt-surface"
+                          : "bg-kt-amber text-white"
                     }`}
                   >
                     {ticket.status}
                   </span>
                 </div>
-                <h2 className="text-lg font-bold text-white">
+
+                <h2 className="font-display text-2xl font-extrabold uppercase leading-tight text-kt-ink">
                   {ticket.event_title || ticket.event_id}
                 </h2>
-                <p className="text-sm text-indigo-300">
-                  Ghế: {ticket.seat_label || ticket.seat_id}
-                </p>
+
+                <div className="inline-block rounded-[3px] border-2 border-kt-ink bg-kt-ground px-3 py-1 font-mono text-sm font-bold text-kt-ink">
+                  GHẾ {ticket.seat_label || ticket.seat_id}
+                </div>
               </div>
 
               {qrDataUrl && qrToken ? (
-                <div className="mt-5 space-y-3 border-t border-slate-800 pt-4 text-center">
+                <div className="kt-perforated-top bg-kt-ground p-5 text-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={qrDataUrl}
-                    alt={`QR ${ticket.ticket_code}`}
-                    className="mx-auto h-44 w-44 rounded-lg bg-white p-2"
+                    alt={`Mã QR vé ${ticket.ticket_code}`}
+                    className="mx-auto h-44 w-44 rounded-[3px] border-2 border-kt-ink bg-white p-2"
                   />
                   <button
                     type="button"
                     onClick={() => void copyToken(ticket.id, qrToken)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white"
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-[3px] border-2 border-kt-ink bg-kt-surface px-3.5 py-1.5 text-xs font-bold text-kt-ink transition hover:bg-kt-ink hover:text-kt-surface"
                   >
                     <Copy className="h-3.5 w-3.5" />
                     {copiedId === ticket.id
-                      ? "Đã copy mã QR Token!"
-                      : "Copy QR Token"}
+                      ? "Đã sao chép QR Token"
+                      : "Sao chép QR Token"}
                   </button>
                 </div>
               ) : (
-                <div className="mt-5 flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-700 p-4 text-xs text-slate-400">
+                <div className="kt-perforated-top flex items-center justify-center gap-2 bg-kt-ground p-5 text-xs font-medium text-kt-muted">
                   <QrCode className="h-4 w-4" />
-                  QR khả dụng sau khi thanh toán hoàn tất
+                  QR mở khóa sau khi thanh toán hoàn tất
                 </div>
               )}
             </article>

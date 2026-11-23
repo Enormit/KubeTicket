@@ -29,9 +29,11 @@ export default function EventSeatsPage() {
   const [conflictSeatId, setConflictSeatId] = useState<string | null>(null);
 
   const zones = useSeatStore((s) => s.zones);
+  const seq = useSeatStore((s) => s.seq);
   const seatsById = useSeatStore((s) => s.seatsById);
   const myHeldSeatIds = useSeatStore((s) => s.myHeldSeatIds);
   const myHoldToken = useSeatStore((s) => s.myHoldToken);
+  const myHoldExpiresAt = useSeatStore((s) => s.myHoldExpiresAt);
   const setSnapshot = useSeatStore((s) => s.setSnapshot);
   const setLocking = useSeatStore((s) => s.setLocking);
   const addMyHold = useSeatStore((s) => s.addMyHold);
@@ -142,7 +144,9 @@ export default function EventSeatsPage() {
         if (err instanceof APIError) {
           if (err.status === 409) {
             setConflictSeatId(seat.id);
-            setToast(`Ghế ${seat.label} vừa có người khác giữ!`);
+            setToast(
+              `Ghế ${seat.label} vừa có người khác giữ trước 1 mili-giây!`
+            );
             setTimeout(() => setConflictSeatId(null), 1200);
             void resyncSnapshot();
           } else if (err.status === 403) {
@@ -172,7 +176,7 @@ export default function EventSeatsPage() {
   );
 
   const handleTimerExpired = useCallback(() => {
-    setToast("Thời gian giữ ghế đã hết hạn. Đang đồng bộ lại sơ đồ...");
+    setToast("Hết thời gian giữ ghế 300s. Đang đồng bộ lại sơ đồ...");
     useSeatStore.getState().clearMyHolds();
     void resyncSnapshot();
   }, [resyncSnapshot]);
@@ -186,6 +190,7 @@ export default function EventSeatsPage() {
           eventId,
           eventTitle: event?.title || "Sự kiện",
           holdToken: myHoldToken,
+          expiresAt: myHoldExpiresAt,
           seatIds: myHeldSeatIds,
           totalCents: selectedSummary.totalCents,
           items: selectedSummary.items.map((i) => ({
@@ -202,38 +207,48 @@ export default function EventSeatsPage() {
 
   if (loading) {
     return (
-      <div className="h-96 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/60" />
+      <div className="h-96 animate-pulse rounded-[4px] border-2 border-kt-rule bg-kt-surface" />
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-kt-ink pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="font-display text-3xl font-extrabold uppercase tracking-tight text-kt-ink sm:text-5xl">
             {event?.title || "Chọn ghế sự kiện"}
           </h1>
-          <p className="text-sm text-slate-400">{event?.venue}</p>
+          <p className="mt-1 text-sm font-medium text-kt-muted">
+            {event?.venue}
+          </p>
         </div>
 
-        <span
-          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
-            connectionState === "connected"
-              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-              : "border-amber-500/40 bg-amber-500/10 text-amber-300"
-          }`}
-        >
-          {connectionState === "connected" ? (
-            <Wifi className="h-3.5 w-3.5" />
-          ) : (
-            <WifiOff className="h-3.5 w-3.5" />
-          )}
-          WS: {connectionState}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-xs font-bold text-kt-muted kt-tabular">
+            seq #{seq}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-[3px] border-2 border-kt-ink px-3 py-1 font-mono text-xs font-bold uppercase ${
+              connectionState === "connected"
+                ? "bg-kt-emerald text-white"
+                : "bg-kt-amber text-white"
+            }`}
+          >
+            {connectionState === "connected" ? (
+              <Wifi className="h-3.5 w-3.5" />
+            ) : (
+              <WifiOff className="h-3.5 w-3.5" />
+            )}
+            WS: {connectionState}
+          </span>
+        </div>
       </div>
 
       {toast && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+        <div
+          role="status"
+          className="flex items-center gap-2.5 rounded-[3px] border-2 border-kt-ink bg-kt-amber px-4 py-3 text-sm font-semibold text-white"
+        >
           <AlertTriangle className="h-4 w-4 shrink-0" />
           <span>{toast}</span>
         </div>
@@ -247,40 +262,47 @@ export default function EventSeatsPage() {
           />
         </div>
 
-        <aside className="space-y-4 lg:col-span-4">
-          <div className="sticky top-24 space-y-4 rounded-2xl border border-slate-800 bg-slate-900/85 p-5">
-            <h3 className="text-base font-bold text-white">
-              Ghế đang giữ ({selectedSummary.items.length}/
-              {event?.max_seats_per_order || 4})
-            </h3>
+        <aside className="lg:col-span-4">
+          <div className="kt-card sticky top-24 space-y-4 p-5">
+            <div className="flex items-center justify-between border-b-2 border-dashed border-kt-rule pb-3">
+              <h3 className="font-display text-2xl font-extrabold uppercase tracking-tight text-kt-ink">
+                Cuống vé đang giữ
+              </h3>
+              <span className="rounded-[2px] bg-kt-ink px-2 py-0.5 font-mono text-xs font-bold text-kt-surface kt-tabular">
+                {selectedSummary.items.length}/
+                {event?.max_seats_per_order || 4}
+              </span>
+            </div>
 
             <SeatTimer onExpired={handleTimerExpired} />
 
             {selectedSummary.items.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-slate-700 p-4 text-center text-xs text-slate-400">
-                Chọn khu vực bên trái rồi bấm vào ghế màu xanh để giữ chỗ
-                nguyên tử trong 300s.
+              <p className="rounded-[3px] border-2 border-dashed border-kt-rule bg-kt-ground p-4 text-center text-xs leading-relaxed text-kt-muted">
+                Bấm vào một khu vực bên trái, sau đó chọn ghế màu xanh lục để
+                khóa nguyên tử trong 300 giây.
               </p>
             ) : (
               <ul className="space-y-2">
                 {selectedSummary.items.map(({ seat, zone }) => (
                   <li
                     key={seat.id}
-                    className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-sm"
+                    className="flex items-center justify-between rounded-[3px] border-2 border-kt-ink bg-kt-ground px-3 py-2.5 text-sm"
                   >
                     <div>
-                      <p className="font-semibold text-white">{seat.label}</p>
-                      <p className="text-xs text-slate-400">{zone.name}</p>
+                      <p className="font-mono font-bold text-kt-ink">
+                        {seat.label}
+                      </p>
+                      <p className="text-xs text-kt-muted">{zone.name}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-mono text-emerald-300">
+                      <span className="font-mono font-bold text-kt-ink kt-tabular">
                         ${(zone.price_cents / 100).toFixed(2)}
                       </span>
                       <button
                         type="button"
                         onClick={() => void handleSeatClick(seat)}
-                        aria-label={`Hủy giữ ${seat.label}`}
-                        className="text-slate-400 hover:text-rose-400"
+                        aria-label={`Hủy giữ ghế ${seat.label}`}
+                        className="rounded-[2px] p-1 text-kt-muted transition hover:bg-kt-danger hover:text-white"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -290,9 +312,11 @@ export default function EventSeatsPage() {
               </ul>
             )}
 
-            <div className="flex items-center justify-between border-t border-slate-800 pt-4 text-sm">
-              <span className="text-slate-400">Tạm tính</span>
-              <span className="text-xl font-extrabold text-white">
+            <div className="kt-perforated-top flex items-center justify-between pt-4 text-sm">
+              <span className="font-bold uppercase tracking-wider text-kt-muted">
+                Tạm tính
+              </span>
+              <span className="font-mono text-2xl font-extrabold text-kt-ink kt-tabular">
                 ${(selectedSummary.totalCents / 100).toFixed(2)}
               </span>
             </div>
@@ -301,7 +325,7 @@ export default function EventSeatsPage() {
               type="button"
               disabled={selectedSummary.items.length === 0}
               onClick={handleProceedCheckout}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-[3px] border-2 border-kt-ink bg-kt-accent py-3.5 text-sm font-extrabold uppercase tracking-wide text-kt-ink transition hover:bg-kt-ink hover:text-kt-surface disabled:cursor-not-allowed disabled:opacity-50"
             >
               Tiếp tục thanh toán
               <ArrowRight className="h-4 w-4" />

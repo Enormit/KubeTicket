@@ -33,7 +33,7 @@ function playAdmissionChime(): void {
     osc.start();
     osc.stop(ctx.currentTime + 0.35);
   } catch {
-    // Ignore audio context autoplay blocks
+    // Ignore browser autoplay blocks
   }
 }
 
@@ -99,7 +99,7 @@ function WaitingRoomInner() {
               handleAdmitted(next);
             }
           } catch {
-            // Keep polling on transient blips
+            // Keep polling on transient network blips
           }
         }, 2000);
       } catch (err) {
@@ -133,85 +133,101 @@ function WaitingRoomInner() {
 
   if (!eventId) {
     return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900/80 p-8 text-center">
-        <p className="text-slate-300">Thiếu mã sự kiện (`event_id`).</p>
+      <div className="mx-auto max-w-lg kt-card p-8 text-center">
+        <p className="text-sm font-medium text-kt-ink">
+          Thiếu mã sự kiện cần xếp hàng.
+        </p>
         <Link
           href="/"
-          className="mt-4 inline-block text-indigo-400 hover:underline"
+          className="mt-4 inline-block text-sm font-bold text-kt-ink underline underline-offset-4"
         >
-          Quay lại danh sách sự kiện
+          Quay lại lịch sự kiện
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900/85 p-8 shadow-xl">
-      <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-500/20 text-indigo-400">
-          <Users className="h-6 w-6" />
-        </span>
-        <div>
-          <h1 className="text-xl font-bold text-white">
-            Phòng chờ ảo (Virtual Waiting Room)
-          </h1>
-          <p className="text-xs text-slate-400">
-            Hệ thống điều tiết lưu lượng công bằng theo thứ tự FIFO
-          </p>
-        </div>
-      </div>
-
-      {error ? (
-        <div className="mt-6 flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 p-4 text-sm text-rose-200">
-          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <p>{error}</p>
-            <Link
-              href="/"
-              className="mt-2 inline-block text-xs text-indigo-300 underline"
-            >
-              Về trang chủ
-            </Link>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-8 space-y-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="text-xs text-slate-400">Vị trí của bạn</p>
-              <p className="mt-1 text-3xl font-extrabold text-indigo-400">
-                {status ? `#${status.position}` : "..."}
-              </p>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-              <p className="flex items-center gap-1 text-xs text-slate-400">
-                <Clock className="h-3.5 w-3.5" />
-                Dự kiến chờ
-              </p>
-              <p className="mt-1 text-3xl font-extrabold text-white">
-                {status ? `${status.estimated_wait_sec}s` : "..."}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-950/20 p-4 text-sm text-emerald-200">
-            <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
-            <span>
-              Đang giữ vị trí hàng chờ — Vui lòng không tắt trình duyệt. Hệ
-              thống sẽ tự chuyển vào trang chọn ghế khi tới lượt.
+    <div className="mx-auto max-w-xl py-4">
+      <section className="kt-card overflow-hidden">
+        <div className="border-b-2 border-kt-ink bg-kt-ink px-6 py-4 text-kt-surface">
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+            <span className="inline-flex items-center gap-2">
+              <Users className="h-4 w-4 text-kt-accent" />
+              Cổng điều tiết lưu lượng FIFO
             </span>
+            <span className="font-mono text-kt-alt">TURNSTILE QUEUE</span>
           </div>
-
-          <button
-            type="button"
-            onClick={enableNotifications}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-800/50 py-2.5 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white"
-          >
-            <Bell className="h-4 w-4" />
-            Bật thông báo trình duyệt khi tới lượt
-          </button>
         </div>
-      )}
+
+        <div className="p-6 sm:p-8">
+          <h1 className="font-display text-4xl font-extrabold uppercase tracking-tight text-kt-ink">
+            Phòng chờ ảo trực tuyến
+          </h1>
+          <p className="mt-1 text-sm text-kt-muted">
+            Mỗi tài khoản giữ duy nhất một lượt hợp lệ theo thứ tự vào hàng.
+          </p>
+
+          {error ? (
+            <div
+              role="alert"
+              className="mt-6 flex items-start gap-2.5 rounded-[3px] border-2 border-kt-danger bg-kt-ground p-4 text-sm text-kt-danger"
+            >
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-bold">{error}</p>
+                <Link
+                  href="/"
+                  className="mt-2 inline-block text-xs font-bold text-kt-ink underline"
+                >
+                  Quay về trang chủ
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-[3px] border-2 border-kt-ink bg-kt-ground p-4">
+                  <p className="text-xs font-bold uppercase tracking-wider text-kt-muted">
+                    Thứ tự hiện tại
+                  </p>
+                  <p className="mt-1 font-mono text-4xl font-extrabold text-kt-ink kt-tabular">
+                    {status ? `#${Math.max(1, status.position)}` : "..."}
+                  </p>
+                </div>
+                <div className="rounded-[3px] border-2 border-kt-ink bg-kt-ground p-4">
+                  <p className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-kt-muted">
+                    <Clock className="h-3.5 w-3.5" />
+                    Thời gian chờ
+                  </p>
+                  <p className="mt-1 font-mono text-4xl font-extrabold text-kt-ink kt-tabular">
+                    {status ? `${status.estimated_wait_sec}s` : "..."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="kt-perforated-top pt-5">
+                <div className="flex items-center gap-3 rounded-[3px] border-2 border-kt-emerald bg-kt-emerald px-4 py-3.5 text-sm font-medium text-white">
+                  <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+                  <span>
+                    Đang giữ vị trí — Không đóng trình duyệt. Hệ thống sẽ tự
+                    chuyển sang sơ đồ chọn ghế ngay khi cổng mở cho bạn.
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={enableNotifications}
+                className="flex w-full items-center justify-center gap-2 rounded-[3px] border-2 border-kt-ink bg-kt-surface py-2.5 text-xs font-bold uppercase tracking-wider text-kt-ink transition hover:bg-kt-alt"
+              >
+                <Bell className="h-4 w-4" />
+                Bật thông báo trình duyệt khi tới lượt
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -220,8 +236,8 @@ export default function WaitingRoomPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900/80 p-8 text-sm text-slate-400">
-          Đang kết nối phòng chờ...
+        <div className="mx-auto max-w-xl kt-card p-8 text-sm text-kt-muted">
+          Đang kết nối cổng phòng chờ...
         </div>
       }
     >

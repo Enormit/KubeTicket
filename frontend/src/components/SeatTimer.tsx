@@ -7,10 +7,12 @@ import { computeRemainingSeconds, formatCountdown } from "@/lib/timer";
 
 interface SeatTimerProps {
   onExpired?: () => void;
+  fallbackExpiresAt?: string | null;
 }
 
-export function SeatTimer({ onExpired }: SeatTimerProps) {
-  const expiresAt = useSeatStore((s) => s.myHoldExpiresAt);
+export function SeatTimer({ onExpired, fallbackExpiresAt }: SeatTimerProps) {
+  const storeExpiresAt = useSeatStore((s) => s.myHoldExpiresAt);
+  const expiresAt = storeExpiresAt ?? fallbackExpiresAt ?? null;
   const serverOffsetMs = useSeatStore((s) => s.serverOffsetMs);
   const [remaining, setRemaining] = useState(() =>
     computeRemainingSeconds(expiresAt, serverOffsetMs)
@@ -41,17 +43,19 @@ export function SeatTimer({ onExpired }: SeatTimerProps) {
 
   return (
     <div
-      className={`flex items-center justify-between rounded-lg border px-3 py-2 text-sm font-semibold ${
+      className={`flex items-center justify-between rounded-[3px] border-2 px-3.5 py-2.5 text-sm font-bold ${
         urgent
-          ? "border-rose-500/50 bg-rose-950/40 text-rose-200"
-          : "border-amber-500/40 bg-amber-950/30 text-amber-200"
+          ? "border-kt-danger bg-kt-danger text-white"
+          : "border-kt-ink bg-kt-ground text-kt-ink"
       }`}
     >
-      <span className="flex items-center gap-1.5 text-xs font-medium">
+      <span className="inline-flex items-center gap-1.5 text-xs uppercase tracking-wider">
         <Timer className="h-4 w-4" />
-        Thời gian giữ ghế (đồng bộ server)
+        Hạn giữ ghế (Server)
       </span>
-      <span className="font-mono text-base">{formatCountdown(remaining)}</span>
+      <span className="font-mono text-lg kt-tabular">
+        {formatCountdown(remaining)}
+      </span>
     </div>
   );
 }

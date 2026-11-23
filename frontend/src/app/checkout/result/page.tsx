@@ -31,7 +31,7 @@ function CheckoutResultInner() {
       const found = (res.orders || []).find((o) => o.id === orderId) || null;
       if (found) setOrder(found);
     } catch {
-      // Order worker might still be consuming SQS/Stream message
+      // Order worker might still be consuming message
     }
   }, [orderId]);
 
@@ -67,7 +67,7 @@ function CheckoutResultInner() {
       setError(
         err instanceof APIError
           ? err.message
-          : "Không thể giả lập thanh toán (đợi worker tạo đơn xong rồi thử lại)"
+          : "Không thể giả lập thanh toán (chờ worker ghi đơn rồi thử lại)"
       );
     } finally {
       setPaying(false);
@@ -76,9 +76,12 @@ function CheckoutResultInner() {
 
   if (!orderId) {
     return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-slate-800 bg-slate-900/80 p-8 text-center">
-        <p className="text-slate-300">Thiếu mã đơn hàng.</p>
-        <Link href="/" className="mt-4 inline-block text-indigo-400 underline">
+      <div className="mx-auto max-w-lg kt-card p-8 text-center">
+        <p className="text-sm text-kt-ink">Thiếu mã đơn hàng.</p>
+        <Link
+          href="/"
+          className="mt-4 inline-block text-sm font-bold text-kt-ink underline"
+        >
           Về trang chủ
         </Link>
       </div>
@@ -88,111 +91,124 @@ function CheckoutResultInner() {
   const status = order?.status || "PENDING";
 
   return (
-    <div className="mx-auto max-w-xl space-y-6 rounded-2xl border border-slate-800 bg-slate-900/85 p-8 shadow-xl">
-      {status === "COMPLETED" ? (
-        <div className="flex items-center gap-3 text-emerald-300">
-          <CheckCircle2 className="h-8 w-8 shrink-0" />
-          <div>
-            <h1 className="text-xl font-bold text-white">
-              Thanh toán thành công!
-            </h1>
-            <p className="text-sm text-slate-300">
-              Vé điện tử QR đã sẵn sàng trong mục Vé của tôi.
-            </p>
+    <div className="mx-auto max-w-xl py-4">
+      <section className="kt-card space-y-6 p-6 sm:p-8">
+        {status === "COMPLETED" ? (
+          <div className="flex items-start gap-3 rounded-[3px] border-2 border-kt-emerald bg-kt-emerald p-4 text-white">
+            <CheckCircle2 className="mt-0.5 h-7 w-7 shrink-0" />
+            <div>
+              <h1 className="font-display text-3xl font-extrabold uppercase tracking-tight">
+                Thanh toán thành công
+              </h1>
+              <p className="mt-0.5 text-sm">
+                Vé điện tử QR HMAC-SHA256 đã phát hành vào ví vé của bạn.
+              </p>
+            </div>
           </div>
-        </div>
-      ) : status === "EXPIRED" ||
-        status === "CANCELLED" ||
-        status === "REFUNDED_EXPIRED" ? (
-        <div className="flex items-center gap-3 text-rose-300">
-          <XCircle className="h-8 w-8 shrink-0" />
-          <div>
-            <h1 className="text-xl font-bold text-white">
-              Đơn hàng đã hết hạn ({status})
-            </h1>
-            <p className="text-sm text-slate-300">
-              {status === "REFUNDED_EXPIRED"
-                ? "Thanh toán đến trễ sau khi hết giờ — hệ thống đã tự động hoàn tiền."
-                : "Ghế đã được trả về trạng thái trống cho người dùng khác."}
-            </p>
+        ) : status === "EXPIRED" ||
+          status === "CANCELLED" ||
+          status === "REFUNDED_EXPIRED" ? (
+          <div className="flex items-start gap-3 rounded-[3px] border-2 border-kt-danger bg-kt-danger p-4 text-white">
+            <XCircle className="mt-0.5 h-7 w-7 shrink-0" />
+            <div>
+              <h1 className="font-display text-3xl font-extrabold uppercase tracking-tight">
+                Đơn đã đóng ({status})
+              </h1>
+              <p className="mt-0.5 text-sm">
+                {status === "REFUNDED_EXPIRED"
+                  ? "Thanh toán đến trễ sau khi hết hạn giữ ghế — hệ thống đã hoàn tiền tự động."
+                  : "Ghế đã được trả về trạng thái trống cho người dùng khác."}
+              </p>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex items-center gap-3 text-amber-300">
-          <Loader2 className="h-8 w-8 animate-spin shrink-0" />
-          <div>
-            <h1 className="text-xl font-bold text-white">
-              Đang chờ xác nhận thanh toán...
-            </h1>
-            <p className="text-sm text-slate-300">
-              Order Worker đang xử lý bất đồng bộ đơn <code className="text-xs">{orderId}</code>.
-            </p>
+        ) : (
+          <div className="flex items-start gap-3 rounded-[3px] border-2 border-kt-ink bg-kt-ground p-4 text-kt-ink">
+            <Loader2 className="mt-1 h-6 w-6 shrink-0 animate-spin text-kt-accent" />
+            <div>
+              <h1 className="font-display text-3xl font-extrabold uppercase tracking-tight">
+                Đang chờ xác nhận thanh toán
+              </h1>
+              <p className="mt-1 text-xs text-kt-muted">
+                Order Worker đang xử lý bất đồng bộ đơn{" "}
+                <span className="font-mono font-bold text-kt-ink">
+                  {orderId}
+                </span>
+                .
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {order && (
-        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4 text-sm space-y-2">
-          <div className="flex justify-between">
-            <span className="text-slate-400">Mã đơn</span>
-            <span className="font-mono text-xs text-slate-200">{order.id}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Trạng thái</span>
-            <span className="font-semibold text-white">{order.status}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-400">Tổng tiền</span>
-            <span className="font-mono text-emerald-300">
-              ${(order.total_cents / 100).toFixed(2)}
-            </span>
-          </div>
-        </div>
-      )}
+        {order && (
+          <dl className="space-y-2 rounded-[3px] border-2 border-kt-ink bg-kt-ground p-4 text-sm">
+            <div className="flex justify-between gap-2">
+              <dt className="text-kt-muted">Mã đơn</dt>
+              <dd className="truncate font-mono text-xs font-bold text-kt-ink">
+                {order.id}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-kt-muted">Trạng thái</dt>
+              <dd className="font-mono font-bold text-kt-ink">
+                {order.status}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-kt-muted">Tổng thanh toán</dt>
+              <dd className="font-mono font-extrabold text-kt-ink kt-tabular">
+                ${(order.total_cents / 100).toFixed(2)}
+              </dd>
+            </div>
+          </dl>
+        )}
 
-      {error && (
-        <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 p-3 text-sm text-rose-200">
-          {error}
-        </div>
-      )}
-
-      {status === "PENDING" && (
-        <div className="space-y-3 rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-4">
-          <p className="flex items-center gap-1.5 text-xs text-indigo-200">
-            <Clock className="h-3.5 w-3.5" />
-            Môi trường Local Sandbox: Bấm nút dưới để kích hoạt webhook thanh
-            toán thành công về Order Worker.
-          </p>
-          <button
-            type="button"
-            disabled={paying || !order}
-            onClick={handleSandboxPay}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-60"
+        {error && (
+          <div
+            role="alert"
+            className="rounded-[3px] border-2 border-kt-danger bg-kt-ground p-3 text-sm font-medium text-kt-danger"
           >
-            <CreditCard className="h-4 w-4" />
-            {!order
-              ? "Đang chờ worker ghi đơn PENDING..."
-              : paying
-                ? "Đang gửi webhook..."
-                : "Hoàn tất thanh toán Sandbox"}
-          </button>
-        </div>
-      )}
+            {error}
+          </div>
+        )}
 
-      <div className="flex gap-3">
-        <Link
-          href="/tickets"
-          className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-center text-sm font-semibold text-white transition hover:bg-indigo-500"
-        >
-          Xem vé của tôi
-        </Link>
-        <Link
-          href="/"
-          className="flex-1 rounded-xl border border-slate-700 py-2.5 text-center text-sm font-semibold text-slate-300 transition hover:border-slate-500"
-        >
-          Về trang chủ
-        </Link>
-      </div>
+        {status === "PENDING" && (
+          <div className="kt-perforated-top space-y-3 pt-5">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-kt-muted">
+              <Clock className="h-3.5 w-3.5 text-kt-ink" />
+              Môi trường Sandbox: bấm nút dưới để gửi Webhook xác nhận thanh
+              toán tới Order Worker.
+            </p>
+            <button
+              type="button"
+              disabled={paying || !order}
+              onClick={handleSandboxPay}
+              className="flex w-full items-center justify-center gap-2 rounded-[3px] border-2 border-kt-ink bg-kt-emerald py-3 text-sm font-extrabold uppercase tracking-wide text-white transition hover:bg-kt-ink disabled:opacity-60"
+            >
+              <CreditCard className="h-4 w-4" />
+              {!order
+                ? "Đang chờ worker tạo đơn PENDING..."
+                : paying
+                  ? "Đang xử lý webhook..."
+                  : "Hoàn tất thanh toán Sandbox"}
+            </button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <Link
+            href="/tickets"
+            className="rounded-[3px] border-2 border-kt-ink bg-kt-accent py-2.5 text-center text-sm font-extrabold uppercase text-kt-ink transition hover:bg-kt-ink hover:text-kt-surface"
+          >
+            Xem vé của tôi
+          </Link>
+          <Link
+            href="/"
+            className="rounded-[3px] border-2 border-kt-ink bg-kt-surface py-2.5 text-center text-sm font-bold uppercase text-kt-ink transition hover:bg-kt-alt"
+          >
+            Về trang chủ
+          </Link>
+        </div>
+      </section>
     </div>
   );
 }
@@ -201,8 +217,8 @@ export default function CheckoutResultPage() {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto max-w-xl rounded-2xl border border-slate-800 bg-slate-900/80 p-8 text-sm text-slate-400">
-          Đang kiểm tra kết quả đơn hàng...
+        <div className="mx-auto max-w-xl kt-card p-8 text-sm text-kt-muted">
+          Đang kiểm tra trạng thái đơn hàng...
         </div>
       }
     >
