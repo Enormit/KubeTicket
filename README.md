@@ -15,6 +15,10 @@ Cloud-native **Flash Sale Event Ticketing** system built with **Golang microserv
 4. **Secure E-Tickets & Gate Check-In:**
    - `HMAC-SHA256` signed QR payloads and atomic `ON CONFLICT DO NOTHING` gate check-in to prevent duplicate scans.
 
+## AWS EKS Architecture
+
+![KubeTicket AWS EKS Multi-AZ Architecture](./EKS.png)
+
 ## Monorepo Layout
 
 ```text
@@ -46,3 +50,63 @@ kubeticket/
    ```bash
    make help
    ```
+
+## Service Topology & Routing
+
+| Component | Port | Health / Readiness | Metrics | Routed Paths |
+| --- | --- | --- | --- | --- |
+| `gateway-api` | `8080` | `/healthz`, `/readyz` | `/metrics` | `/api/*` (default REST API) |
+| `flashsale-engine` | `8081` | `/healthz`, `/readyz` | `/metrics` | `/ws/*`, `/api/v1/(waiting-room\|holds\|checkout)` |
+| `order-worker` | `8082` | `/healthz`, `/readyz` | `/metrics` | `/api/v1/(webhooks\|payments)`, SQS FIFO consumer |
+| `frontend` | `3000` | `/` | — | `/` (Next.js standalone UI + runtime proxy) |
+
+## Kubernetes Deployment & Helm Chart Design (`deploy/`)
+
+The Helm chart under `deploy/charts/kubeticket/` translates the local `docker-compose.yml` and `docker/nginx/default.conf` topology into environment-aware Kubernetes manifests.
+
+### Configuration Strategy (3-Tier Separation)
+
+Runtime configuration from `services/pkg/config/config.go` and Next.js runtime routes (`frontend/src/app/api/*`) is split into three tiers:
+
+1. **Shared Non-Sensitive Config (`templates/configmap.yaml`, implemented):**
+   - `<fullname>-config`: Go service settings (`APP_ENV`, `LOG_LEVEL`, `DB_MAX_CONNS`, `DB_MIN_CONNS`, `DB_SIMPLE_PROTOCOL`, `REDIS_MODE`, `SEAT_HOLD_TTL_SECONDS`, `CHECKOUT_HOLD_TTL_SECONDS`, `QUEUE_ADMISSION_RATE`, `JWT_EXPIRES_IN`, `COOKIE_SECURE`, `AWS_REGION`, `SQS_ORDER_QUEUE_URL`, `PAYMENT_PROVIDER`, `PAYMENT_WEBHOOK_TOLERANCE_SECONDS`, `PROMETHEUS_METRICS_PATH`, `CORS_ALLOWED_ORIGINS`).
+   - `<fullname>-frontend-config`: Next.js runtime variables (`NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, `BACKEND_INTERNAL_URL`, defaulting to `http://<fullname>-gateway-api:8080` when empty).
+2. **Sensitive Credentials (`templates/secret.yaml`, `templates/externalsecret.yaml` & `templates/serviceaccount.yaml`, implemented):**
+   - Managed keys (`DATABASE_URL`, `NEON_DATABASE_DIRECT_URL`, `REDIS_URL`, `JWT_SECRET`, `TICKET_QR_HMAC_SECRET`, `TURNSTILE_SECRET_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`) resolve to a single target Secret (`kubeticket.secretName`):
+     - **Local (`externalSecrets.enabled=false`):** Helm renders an `Opaque` Kubernetes `Secret` from `values-local.yaml`.
+     - **EKS (`externalSecrets.enabled=true`):** Helm renders an `ExternalSecret` (`external-secrets.io/v1beta1`) syncing from AWS Secrets Manager (`kubeticket/<env>/secrets`) via `ClusterSecretStore`, paired with IRSA annotations on `ServiceAccount`.
+     - **Pre-created secret (`secrets.existingSecret`):** skips both templates and binds directly to an existing cluster Secret.
+3. **Per-Workload Identity (`templates/deployment.yaml`, next):**
+   - `PORT` and `APP_NAME` are injected per Deployment (`8080`/`gateway-api`, `8081`/`flashsale-engine`, `8082`/`order-worker`, `3000`/`frontend`) rather than shared globally.
+
+### Environment Values Hierarchy
+
+| File | Purpose | Key Overrides |
+| --- | --- | --- |
+| `values.yaml` | Production-safe chart defaults | `APP_ENV=production`, `COOKIE_SECURE=true`, `DB_SIMPLE_PROTOCOL=true`, `externalSecrets.enabled=true` |
+| `values-local.yaml` | Local `kind` / `k3d` testing *(excluded by `.helmignore` on package)* | `APP_ENV=development`, `LOG_LEVEL=debug`, `DB_SIMPLE_PROTOCOL=false`, `COOKIE_SECURE=false`, `externalSecrets.enabled=false`, local `Secret` defaults |
+| `values-dev.yaml` | EKS staging / dev environment | `APP_ENV=staging`, `wss://dev.kubeticket.example.com`, IRSA role + `kubeticket/dev/secrets` |
+| `values-prod.yaml` | EKS production environment | `APP_ENV=production`, `DB_MAX_CONNS=20`, `DB_MIN_CONNS=5`, `QUEUE_ADMISSION_RATE=100`, IRSA role + `kubeticket/prod/secrets` |
+
+### Helm & GitOps Implementation Progress
+
+- **Implemented:** `Chart.yaml`, `.helmignore`, `templates/_helpers.tpl`, `templates/configmap.yaml`, `templates/serviceaccount.yaml`, `templates/secret.yaml`, `templates/externalsecret.yaml`, `values.yaml`, `values-local.yaml`, `values-dev.yaml`, `values-prod.yaml`.
+- **Scaffolded (next):** workloads & networking (`deployment.yaml`, `service.yaml`, `ingress.yaml`, `migration-job.yaml`), autoscaling & resilience (`hpa.yaml`, `scaledobject.yaml`, `pdb.yaml`, `servicemonitor.yaml`), `deploy/argocd/`, and `deploy/monitoring/`.
+
+Render and inspect the implemented ConfigMap, ServiceAccount, Secret, and ExternalSecret manifests locally with Helm:
+
+```bash
+# Local mode (renders ConfigMaps + ServiceAccount + Secret)
+helm template kubeticket deploy/charts/kubeticket \
+  -f deploy/charts/kubeticket/values-local.yaml \
+  -s templates/configmap.yaml \
+  -s templates/serviceaccount.yaml \
+  -s templates/secret.yaml
+
+# Prod/EKS mode (renders ConfigMaps + ServiceAccount + ExternalSecret)
+helm template kubeticket deploy/charts/kubeticket \
+  -f deploy/charts/kubeticket/values-prod.yaml \
+  -s templates/configmap.yaml \
+  -s templates/serviceaccount.yaml \
+  -s templates/externalsecret.yaml
+```
