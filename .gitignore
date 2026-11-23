@@ -30,3 +30,8 @@ out/
 # Markdown docs (except README.md)
 *.md
 !README.md
+
+# Local AI agent skills & design-system scratch
+.agent/
+.gemini/
+.impeccable/
