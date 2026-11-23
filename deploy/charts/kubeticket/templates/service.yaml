@@ -1,0 +1,28 @@
+{{- $fullname := include "kubeticket.fullname" . }}
+{{- $first := true }}
+{{- range $name := keys .Values.services | sortAlpha }}
+{{- $svc := index $.Values.services $name }}
+{{- if $svc.enabled }}
+{{ if not $first }}
+---
+{{ end -}}
+{{- $first = false }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels:
+    {{- include "kubeticket.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  type: {{ $svc.serviceType | default "ClusterIP" }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "kubeticket.selectorLabels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+{{- end }}
+{{- end }}

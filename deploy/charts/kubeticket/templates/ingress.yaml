@@ -1,0 +1,40 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "kubeticket.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "kubeticket.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range $host := .Values.ingress.hosts }}
+    {{- if $host }}
+    - host: {{ $host | quote }}
+      http:
+    {{- else }}
+    - http:
+    {{- end }}
+        paths:
+          {{- range $route := $.Values.ingress.routes }}
+          - path: {{ $route.path }}
+            pathType: {{ $route.pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $fullname }}-{{ $route.service }}
+                port:
+                  number: {{ (index $.Values.services $route.service).port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

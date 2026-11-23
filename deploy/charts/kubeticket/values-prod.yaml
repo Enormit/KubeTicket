@@ -24,3 +24,71 @@ frontendConfig:
   NEXT_PUBLIC_API_URL: ""
   NEXT_PUBLIC_WS_URL: "wss://kubeticket.example.com"
   BACKEND_INTERNAL_URL: ""
+
+services:
+  gateway-api:
+    replicaCount: 3
+    image:
+      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/gateway-api"
+      tag: "latest"
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+  flashsale-engine:
+    replicaCount: 3
+    image:
+      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/flashsale-engine"
+      tag: "latest"
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "2000m"
+        memory: "1Gi"
+  order-worker:
+    replicaCount: 2
+    image:
+      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/order-worker"
+      tag: "latest"
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+  frontend:
+    replicaCount: 2
+    image:
+      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/frontend"
+      tag: "latest"
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    alb.ingress.kubernetes.io/scheme: "internet-facing"
+    alb.ingress.kubernetes.io/target-type: "ip"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/healthcheck-path: "/api/runtime-config"
+  hosts:
+    - "kubeticket.example.com"
+
+migration:
+  enabled: true
+  image:
+    repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/db-migrator"
+    tag: "latest"

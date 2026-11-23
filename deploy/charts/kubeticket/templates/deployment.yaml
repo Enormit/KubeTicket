@@ -1,0 +1,117 @@
+{{- $fullname := include "kubeticket.fullname" . }}
+{{- $secretName := include "kubeticket.secretName" . }}
+{{- $saName := include "kubeticket.serviceAccountName" . }}
+{{- $configChecksum := include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+{{- $secretChecksum := "" }}
+{{- if and (not .Values.externalSecrets.enabled) (not .Values.secrets.existingSecret) }}
+{{- $secretChecksum = include (print $.Template.BasePath "/secret.yaml") $ | sha256sum }}
+{{- end }}
+{{- $first := true }}
+{{- range $name := keys .Values.services | sortAlpha }}
+{{- $svc := index $.Values.services $name }}
+{{- if $svc.enabled }}
+{{ if not $first }}
+---
+{{ end -}}
+{{- $first = false }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels:
+    {{- include "kubeticket.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  replicas: {{ $svc.replicaCount }}
+  revisionHistoryLimit: {{ $.Values.revisionHistoryLimit | default 3 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "kubeticket.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $name }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ $configChecksum | quote }}
+        {{- if $secretChecksum }}
+        checksum/secret: {{ $secretChecksum | quote }}
+        {{- end }}
+        {{- if and $svc.metrics $svc.metrics.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $svc.port | quote }}
+        prometheus.io/path: {{ $.Values.config.PROMETHEUS_METRICS_PATH | default "/metrics" | quote }}
+        {{- end }}
+        {{- with $svc.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "kubeticket.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $name }}
+    spec:
+      serviceAccountName: {{ $saName }}
+      terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds | default 30 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $svc.image.repository }}:{{ $svc.image.tag }}"
+          imagePullPolicy: {{ $svc.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: {{ ternary false true (default false $svc.isFrontend) }}
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+              protocol: TCP
+          envFrom:
+            {{- if $svc.isFrontend }}
+            - configMapRef:
+                name: {{ $fullname }}-frontend-config
+            {{- else }}
+            - configMapRef:
+                name: {{ $fullname }}-config
+            - secretRef:
+                name: {{ $secretName }}
+            {{- end }}
+          env:
+            - name: PORT
+              value: {{ $svc.port | quote }}
+            {{- if not $svc.isFrontend }}
+            - name: APP_NAME
+              value: {{ $name | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ $svc.probes.livenessPath | default "/healthz" }}
+              port: http
+            initialDelaySeconds: {{ $svc.probes.livenessInitialDelaySeconds | default 10 }}
+            periodSeconds: {{ $svc.probes.livenessPeriodSeconds | default 15 }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ $svc.probes.readinessPath | default "/readyz" }}
+              port: http
+            initialDelaySeconds: {{ $svc.probes.readinessInitialDelaySeconds | default 5 }}
+            periodSeconds: {{ $svc.probes.readinessPeriodSeconds | default 10 }}
+            timeoutSeconds: 3
+            failureThreshold: 3
+          {{- with $svc.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
+{{- end }}

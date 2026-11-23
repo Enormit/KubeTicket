@@ -1,5 +1,7 @@
 nameOverride: ""
 fullnameOverride: ""
+revisionHistoryLimit: 3
+imagePullSecrets: []
 
 serviceAccount:
   create: true
@@ -61,3 +63,155 @@ frontendConfig:
   NEXT_PUBLIC_API_URL: ""
   NEXT_PUBLIC_WS_URL: ""
   BACKEND_INTERNAL_URL: ""
+
+# Multi-service workload definitions rendered by templates/deployment.yaml and templates/service.yaml.
+services:
+  gateway-api:
+    enabled: true
+    isFrontend: false
+    replicaCount: 2
+    image:
+      repository: "kubeticket/gateway-api"
+      tag: "latest"
+      pullPolicy: "IfNotPresent"
+    port: 8080
+    serviceType: "ClusterIP"
+    terminationGracePeriodSeconds: 30
+    probes:
+      livenessPath: "/healthz"
+      readinessPath: "/readyz"
+    metrics:
+      enabled: true
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  flashsale-engine:
+    enabled: true
+    isFrontend: false
+    replicaCount: 2
+    image:
+      repository: "kubeticket/flashsale-engine"
+      tag: "latest"
+      pullPolicy: "IfNotPresent"
+    port: 8081
+    serviceType: "ClusterIP"
+    terminationGracePeriodSeconds: 60
+    probes:
+      livenessPath: "/healthz"
+      readinessPath: "/readyz"
+    metrics:
+      enabled: true
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "256Mi"
+      limits:
+        cpu: "1000m"
+        memory: "512Mi"
+
+  order-worker:
+    enabled: true
+    isFrontend: false
+    replicaCount: 2
+    image:
+      repository: "kubeticket/order-worker"
+      tag: "latest"
+      pullPolicy: "IfNotPresent"
+    port: 8082
+    serviceType: "ClusterIP"
+    terminationGracePeriodSeconds: 30
+    probes:
+      livenessPath: "/healthz"
+      readinessPath: "/readyz"
+    metrics:
+      enabled: true
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+
+  frontend:
+    enabled: true
+    isFrontend: true
+    replicaCount: 2
+    image:
+      repository: "kubeticket/frontend"
+      tag: "latest"
+      pullPolicy: "IfNotPresent"
+    port: 3000
+    serviceType: "ClusterIP"
+    terminationGracePeriodSeconds: 30
+    probes:
+      livenessPath: "/api/runtime-config"
+      readinessPath: "/api/runtime-config"
+    metrics:
+      enabled: false
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+
+# Ingress routing aligned with docker/nginx/default.conf using explicit Prefix paths
+# so both NGINX Ingress (local) and AWS ALB Ingress (EKS) behave identically.
+ingress:
+  enabled: true
+  className: "alb"
+  annotations: {}
+  hosts:
+    - "kubeticket.example.com"
+  tls: []
+  routes:
+    - path: "/ws"
+      pathType: "Prefix"
+      service: "flashsale-engine"
+    - path: "/api/v1/waiting-room"
+      pathType: "Prefix"
+      service: "flashsale-engine"
+    - path: "/api/v1/holds"
+      pathType: "Prefix"
+      service: "flashsale-engine"
+    - path: "/api/v1/checkout"
+      pathType: "Prefix"
+      service: "flashsale-engine"
+    - path: "/api/v1/webhooks"
+      pathType: "Prefix"
+      service: "order-worker"
+    - path: "/api/v1/payments"
+      pathType: "Prefix"
+      service: "order-worker"
+    - path: "/api"
+      pathType: "Prefix"
+      service: "gateway-api"
+    - path: "/"
+      pathType: "Prefix"
+      service: "frontend"
+
+# Pre-install / pre-upgrade SQL migration Job (Helm Hook).
+migration:
+  enabled: true
+  seedEnabled: false
+  sqlConfigMap: ""
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  image:
+    repository: "kubeticket/db-migrator"
+    tag: "latest"
+    pullPolicy: "IfNotPresent"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "128Mi"

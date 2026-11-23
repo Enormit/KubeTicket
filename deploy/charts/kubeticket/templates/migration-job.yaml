@@ -1,0 +1,81 @@
+{{- if .Values.migration.enabled }}
+{{- $fullname := include "kubeticket.fullname" . }}
+{{- $secretName := include "kubeticket.secretName" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-db-migrate
+  labels:
+    {{- include "kubeticket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-migrate
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit | default 3 }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds | default 300 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeticket.labels" . | nindent 8 }}
+        app.kubernetes.io/component: db-migrate
+    spec:
+      serviceAccountName: {{ include "kubeticket.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: db-migrate
+          image: "{{ .Values.migration.image.repository }}:{{ .Values.migration.image.tag }}"
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy | default "IfNotPresent" }}
+          envFrom:
+            - secretRef:
+                name: {{ $secretName }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              DB_URL="${NEON_DATABASE_DIRECT_URL:-}"
+              if [ -z "$DB_URL" ]; then
+                DB_URL="${DATABASE_URL:-}"
+              fi
+              if [ -z "$DB_URL" ]; then
+                echo "ERROR: NEON_DATABASE_DIRECT_URL or DATABASE_URL must be set" >&2
+                exit 1
+              fi
+              if [ -z "$(psql "$DB_URL" -tAc "SELECT to_regclass('public.users')")" ]; then
+                for f in /db/migrations/*.up.sql; do
+                  [ -f "$f" ] || continue
+                  echo "Applying $f..."
+                  psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+                done
+              else
+                echo "Schema already initialized; skipping migrations."
+              fi
+              {{- if .Values.migration.seedEnabled }}
+              for f in /db/seed/*.sql; do
+                [ -f "$f" ] || continue
+                echo "Seeding $f..."
+                psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$f"
+              done
+              {{- end }}
+          {{- if .Values.migration.sqlConfigMap }}
+          volumeMounts:
+            - name: migration-sql
+              mountPath: /db/migrations
+              readOnly: true
+          {{- end }}
+          {{- with .Values.migration.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.migration.sqlConfigMap }}
+      volumes:
+        - name: migration-sql
+          configMap:
+            name: {{ .Values.migration.sqlConfigMap | quote }}
+      {{- end }}
+{{- end }}

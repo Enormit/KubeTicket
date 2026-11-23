@@ -55,10 +55,10 @@ kubeticket/
 
 | Component | Port | Health / Readiness | Metrics | Routed Paths |
 | --- | --- | --- | --- | --- |
-| `gateway-api` | `8080` | `/healthz`, `/readyz` | `/metrics` | `/api/*` (default REST API) |
-| `flashsale-engine` | `8081` | `/healthz`, `/readyz` | `/metrics` | `/ws/*`, `/api/v1/(waiting-room\|holds\|checkout)` |
-| `order-worker` | `8082` | `/healthz`, `/readyz` | `/metrics` | `/api/v1/(webhooks\|payments)`, SQS FIFO consumer |
-| `frontend` | `3000` | `/` | — | `/` (Next.js standalone UI + runtime proxy) |
+| `gateway-api` | `8080` | `/healthz`, `/readyz` | `/metrics` | `/api` (default REST API) |
+| `flashsale-engine` | `8081` | `/healthz`, `/readyz` | `/metrics` | `/ws`, `/api/v1/waiting-room`, `/api/v1/holds`, `/api/v1/checkout` |
+| `order-worker` | `8082` | `/healthz`, `/readyz` | `/metrics` | `/api/v1/webhooks`, `/api/v1/payments`, SQS FIFO consumer |
+| `frontend` | `3000` | `/api/runtime-config` | — | `/` (Next.js standalone UI + runtime proxy) |
 
 ## Kubernetes Deployment & Helm Chart Design (`deploy/`)
 
@@ -76,37 +76,32 @@ Runtime configuration from `services/pkg/config/config.go` and Next.js runtime r
      - **Local (`externalSecrets.enabled=false`):** Helm renders an `Opaque` Kubernetes `Secret` from `values-local.yaml`.
      - **EKS (`externalSecrets.enabled=true`):** Helm renders an `ExternalSecret` (`external-secrets.io/v1beta1`) syncing from AWS Secrets Manager (`kubeticket/<env>/secrets`) via `ClusterSecretStore`, paired with IRSA annotations on `ServiceAccount`.
      - **Pre-created secret (`secrets.existingSecret`):** skips both templates and binds directly to an existing cluster Secret.
-3. **Per-Workload Identity (`templates/deployment.yaml`, next):**
-   - `PORT` and `APP_NAME` are injected per Deployment (`8080`/`gateway-api`, `8081`/`flashsale-engine`, `8082`/`order-worker`, `3000`/`frontend`) rather than shared globally.
+3. **Per-Workload Identity (`templates/deployment.yaml`, implemented):**
+   - Multi-service loop (`services` map) generates Deployments and ClusterIP Services (`templates/service.yaml`) for all 4 workloads, injecting `PORT`, `APP_NAME`, security contexts (`runAsNonRoot`), probes, and `checksum/config` / `checksum/secret` rollout annotations.
+   - `templates/ingress.yaml` translates `docker/nginx/default.conf` into ordered explicit `Prefix` routes compatible with both NGINX Ingress (local) and AWS ALB (EKS).
+   - `templates/migration-job.yaml` runs a `pre-install,pre-upgrade` Helm Hook Job using `NEON_DATABASE_DIRECT_URL` (falling back to `DATABASE_URL`).
 
 ### Environment Values Hierarchy
 
 | File | Purpose | Key Overrides |
 | --- | --- | --- |
-| `values.yaml` | Production-safe chart defaults | `APP_ENV=production`, `COOKIE_SECURE=true`, `DB_SIMPLE_PROTOCOL=true`, `externalSecrets.enabled=true` |
-| `values-local.yaml` | Local `kind` / `k3d` testing *(excluded by `.helmignore` on package)* | `APP_ENV=development`, `LOG_LEVEL=debug`, `DB_SIMPLE_PROTOCOL=false`, `COOKIE_SECURE=false`, `externalSecrets.enabled=false`, local `Secret` defaults |
-| `values-dev.yaml` | EKS staging / dev environment | `APP_ENV=staging`, `wss://dev.kubeticket.example.com`, IRSA role + `kubeticket/dev/secrets` |
-| `values-prod.yaml` | EKS production environment | `APP_ENV=production`, `DB_MAX_CONNS=20`, `DB_MIN_CONNS=5`, `QUEUE_ADMISSION_RATE=100`, IRSA role + `kubeticket/prod/secrets` |
+| `values.yaml` | Production-safe chart defaults | `APP_ENV=production`, `COOKIE_SECURE=true`, `DB_SIMPLE_PROTOCOL=true`, `externalSecrets.enabled=true`, `ingress.className=alb` |
+| `values-local.yaml` | Local `kind` / `k3d` testing *(excluded by `.helmignore` on package)* | `APP_ENV=development`, `LOG_LEVEL=debug`, `DB_SIMPLE_PROTOCOL=false`, `COOKIE_SECURE=false`, `externalSecrets.enabled=false`, `ingress.className=nginx`, `replicaCount=1` |
+| `values-dev.yaml` | EKS staging / dev environment | `APP_ENV=staging`, `wss://dev.kubeticket.example.com`, IRSA role + `kubeticket/dev/secrets`, `replicaCount=2` |
+| `values-prod.yaml` | EKS production environment | `APP_ENV=production`, `DB_MAX_CONNS=20`, `DB_MIN_CONNS=5`, `QUEUE_ADMISSION_RATE=100`, IRSA role + `kubeticket/prod/secrets`, `replicaCount=3` (`gateway-api`, `flashsale-engine`) |
 
 ### Helm & GitOps Implementation Progress
 
-- **Implemented:** `Chart.yaml`, `.helmignore`, `templates/_helpers.tpl`, `templates/configmap.yaml`, `templates/serviceaccount.yaml`, `templates/secret.yaml`, `templates/externalsecret.yaml`, `values.yaml`, `values-local.yaml`, `values-dev.yaml`, `values-prod.yaml`.
-- **Scaffolded (next):** workloads & networking (`deployment.yaml`, `service.yaml`, `ingress.yaml`, `migration-job.yaml`), autoscaling & resilience (`hpa.yaml`, `scaledobject.yaml`, `pdb.yaml`, `servicemonitor.yaml`), `deploy/argocd/`, and `deploy/monitoring/`.
+- **Implemented:** `Chart.yaml`, `.helmignore`, `templates/_helpers.tpl`, `templates/configmap.yaml`, `templates/serviceaccount.yaml`, `templates/secret.yaml`, `templates/externalsecret.yaml`, `templates/deployment.yaml`, `templates/service.yaml`, `templates/ingress.yaml`, `templates/migration-job.yaml`, `values.yaml`, `values-local.yaml`, `values-dev.yaml`, `values-prod.yaml`.
+- **Scaffolded (next):** autoscaling & resilience (`hpa.yaml`, `scaledobject.yaml`, `pdb.yaml`, `servicemonitor.yaml`), `deploy/argocd/`, and `deploy/monitoring/`.
 
-Render and inspect the implemented ConfigMap, ServiceAccount, Secret, and ExternalSecret manifests locally with Helm:
+Validate and render the chart locally with Helm:
 
 ```bash
-# Local mode (renders ConfigMaps + ServiceAccount + Secret)
-helm template kubeticket deploy/charts/kubeticket \
-  -f deploy/charts/kubeticket/values-local.yaml \
-  -s templates/configmap.yaml \
-  -s templates/serviceaccount.yaml \
-  -s templates/secret.yaml
+# Lint & render full local manifests (ConfigMaps, ServiceAccount, Secret, Deployments, Services, Ingress)
+helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
+helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
 
-# Prod/EKS mode (renders ConfigMaps + ServiceAccount + ExternalSecret)
-helm template kubeticket deploy/charts/kubeticket \
-  -f deploy/charts/kubeticket/values-prod.yaml \
-  -s templates/configmap.yaml \
-  -s templates/serviceaccount.yaml \
-  -s templates/externalsecret.yaml
+# Render Prod/EKS manifests (includes ExternalSecret & pre-install/upgrade migration Job)
+helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-prod.yaml
 ```

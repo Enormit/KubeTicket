@@ -28,3 +28,77 @@ frontendConfig:
   NEXT_PUBLIC_API_URL: ""
   NEXT_PUBLIC_WS_URL: ""
   BACKEND_INTERNAL_URL: ""
+
+services:
+  gateway-api:
+    replicaCount: 1
+    image:
+      repository: "kubeticket/gateway-api"
+      tag: "dev"
+      pullPolicy: "IfNotPresent"
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "250m"
+        memory: "128Mi"
+  flashsale-engine:
+    replicaCount: 1
+    image:
+      repository: "kubeticket/flashsale-engine"
+      tag: "dev"
+      pullPolicy: "IfNotPresent"
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+  order-worker:
+    replicaCount: 1
+    image:
+      repository: "kubeticket/order-worker"
+      tag: "dev"
+      pullPolicy: "IfNotPresent"
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "64Mi"
+      limits:
+        cpu: "250m"
+        memory: "128Mi"
+  frontend:
+    replicaCount: 1
+    image:
+      repository: "kubeticket/frontend"
+      tag: "dev"
+      pullPolicy: "IfNotPresent"
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "300m"
+        memory: "256Mi"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  hosts:
+    - "kubeticket.local"
+
+# Enable and point sqlConfigMap to a ConfigMap containing db/migrations/*.up.sql
+# when running migrations inside local kind/k3d instead of `make migrate-up`.
+migration:
+  enabled: false
+  seedEnabled: true
+  sqlConfigMap: "kubeticket-migrations"
+  image:
+    repository: "postgres"
+    tag: "16-alpine"
+    pullPolicy: "IfNotPresent"
