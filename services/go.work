@@ -4,4 +4,5 @@ use (
 	./pkg
 	./gateway-api
 	./flashsale-engine
+	./order-worker
 )
