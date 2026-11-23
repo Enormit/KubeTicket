@@ -1,0 +1,18 @@
+config:
+  APP_ENV: "production"
+  LOG_LEVEL: "info"
+  DB_MAX_CONNS: "20"
+  DB_MIN_CONNS: "5"
+  DB_SIMPLE_PROTOCOL: "true"
+  REDIS_MODE: "standalone"
+  SEAT_HOLD_TTL_SECONDS: "300"
+  CHECKOUT_HOLD_TTL_SECONDS: "900"
+  QUEUE_ADMISSION_RATE: "100"
+  COOKIE_SECURE: "true"
+  SQS_ORDER_QUEUE_URL: ""
+  CORS_ALLOWED_ORIGINS: "https://kubeticket.example.com"
+
+frontendConfig:
+  NEXT_PUBLIC_API_URL: ""
+  NEXT_PUBLIC_WS_URL: "wss://kubeticket.example.com"
+  BACKEND_INTERNAL_URL: ""

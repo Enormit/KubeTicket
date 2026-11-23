@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kubeticket
+description: Helm chart for KubeTicket flash-sale ticketing platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

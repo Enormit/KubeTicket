@@ -1,0 +1,24 @@
+{{- $fullname := include "kubeticket.fullname" . }}
+{{- $labels := include "kubeticket.labels" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-config
+  labels:
+    {{- $labels | nindent 4 }}
+data:
+  {{- range $key := keys .Values.config | sortAlpha }}
+  {{ $key }}: {{ index $.Values.config $key | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-frontend-config
+  labels:
+    {{- $labels | nindent 4 }}
+data:
+  {{- $backendURL := default (printf "http://%s-gateway-api:8080" $fullname) .Values.frontendConfig.BACKEND_INTERNAL_URL }}
+  NEXT_PUBLIC_API_URL: {{ .Values.frontendConfig.NEXT_PUBLIC_API_URL | quote }}
+  NEXT_PUBLIC_WS_URL: {{ .Values.frontendConfig.NEXT_PUBLIC_WS_URL | quote }}
+  BACKEND_INTERNAL_URL: {{ $backendURL | quote }}
