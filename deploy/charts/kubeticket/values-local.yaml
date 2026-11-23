@@ -1,3 +1,18 @@
+externalSecrets:
+  enabled: false
+
+secrets:
+  existingSecret: ""
+  data:
+    DATABASE_URL: "postgresql://kubeticket:kubeticket@postgres:5432/kubeticket?sslmode=disable"
+    NEON_DATABASE_DIRECT_URL: "postgresql://kubeticket:kubeticket@postgres:5432/kubeticket?sslmode=disable"
+    REDIS_URL: "redis://redis:6379/0"
+    JWT_SECRET: "local-dev-jwt-secret"
+    TICKET_QR_HMAC_SECRET: "local-dev-qr-hmac-secret"
+    TURNSTILE_SECRET_KEY: ""
+    STRIPE_SECRET_KEY: ""
+    STRIPE_WEBHOOK_SECRET: ""
+
 config:
   APP_ENV: "development"
   LOG_LEVEL: "debug"

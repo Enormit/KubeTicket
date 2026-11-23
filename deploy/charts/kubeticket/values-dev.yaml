@@ -1,3 +1,11 @@
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/kubeticket-dev-app"
+
+externalSecrets:
+  enabled: true
+  remoteSecretName: "kubeticket/dev/secrets"
+
 config:
   APP_ENV: "staging"
   LOG_LEVEL: "info"

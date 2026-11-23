@@ -1,3 +1,11 @@
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/kubeticket-prod-app"
+
+externalSecrets:
+  enabled: true
+  remoteSecretName: "kubeticket/prod/secrets"
+
 config:
   APP_ENV: "production"
   LOG_LEVEL: "info"

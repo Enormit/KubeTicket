@@ -3,8 +3,34 @@ fullnameOverride: ""
 
 serviceAccount:
   create: true
+  automount: true
   name: ""
   annotations: {}
+
+# Sensitive credentials (NEVER commit real production values here).
+# - EKS (dev/prod): keep externalSecrets.enabled=true to sync from AWS Secrets Manager.
+# - Pre-provisioned secret: set secrets.existingSecret to an existing K8s Secret name.
+# - Local testing: override externalSecrets.enabled=false and secrets.data in values-local.yaml.
+secrets:
+  existingSecret: ""
+  data: {}
+
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: "aws-secrets-manager"
+    kind: "ClusterSecretStore"
+  remoteSecretName: "kubeticket/prod/secrets"
+  keys:
+    - DATABASE_URL
+    - NEON_DATABASE_DIRECT_URL
+    - REDIS_URL
+    - JWT_SECRET
+    - TICKET_QR_HMAC_SECRET
+    - TURNSTILE_SECRET_KEY
+    - STRIPE_SECRET_KEY
+    - STRIPE_WEBHOOK_SECRET
 
 # Non-sensitive runtime configuration for Go services (services/pkg/config/config.go).
 # Secrets (DATABASE_URL, REDIS_URL, JWT_SECRET, TICKET_QR_HMAC_SECRET,

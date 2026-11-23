@@ -59,3 +59,14 @@ Create the name of the service account to use.
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve the Kubernetes Secret name used by workloads and ExternalSecret.
+*/}}
+{{- define "kubeticket.secretName" -}}
+{{- if .Values.secrets.existingSecret }}
+{{- .Values.secrets.existingSecret }}
+{{- else }}
+{{- printf "%s-secret" (include "kubeticket.fullname" .) }}
+{{- end }}
+{{- end }}
