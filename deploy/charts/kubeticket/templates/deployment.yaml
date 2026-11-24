@@ -59,6 +59,9 @@ spec:
       terminationGracePeriodSeconds: {{ $svc.terminationGracePeriodSeconds | default 30 }}
       securityContext:
         runAsNonRoot: true
+        runAsUser: {{ ternary 1001 65532 (default false $svc.isFrontend) }}
+        runAsGroup: {{ ternary 1001 65532 (default false $svc.isFrontend) }}
+        fsGroup: {{ ternary 1001 65532 (default false $svc.isFrontend) }}
         seccompProfile:
           type: RuntimeDefault
       {{- with $.Values.imagePullSecrets }}

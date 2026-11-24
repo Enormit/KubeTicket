@@ -1,4 +1,5 @@
-{{- if and .Values.keda.enabled .Values.services.order-worker.enabled }}
+{{- $worker := index .Values.services "order-worker" }}
+{{- if and .Values.keda.enabled $worker $worker.enabled }}
 {{- $fullname := include "kubeticket.fullname" . }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
