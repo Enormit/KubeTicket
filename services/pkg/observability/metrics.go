@@ -1,6 +1,9 @@
 package observability
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -84,6 +87,27 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+// Hijack forwards connection hijacking so WebSocket upgrades succeed through metrics middleware.
+func (sr *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := sr.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
+}
+
+// Flush forwards streaming flushes if supported by the underlying ResponseWriter.
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the underlying ResponseWriter for http.ResponseController.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
 }
 
 // HTTPMetricsMiddleware records RED metrics (Rate, Errors, Duration) per request.

@@ -1,9 +1,11 @@
 package observability
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -56,5 +58,36 @@ func TestMetricsMiddlewareAndEndpoint(t *testing.T) {
 	body := mRec.Body.String()
 	if !strings.Contains(body, `http_requests_total{method="POST",path="/api/v1/events",service="gateway-api",status="201"} 1`) {
 		t.Fatalf("expected counter metric in /metrics output, got:\n%s", body)
+	}
+}
+
+type hijackRecorder struct {
+	http.ResponseWriter
+	hijacked bool
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h.hijacked = true
+	return nil, nil, nil
+}
+
+func TestMetricsMiddlewareForwardsHijacker(t *testing.T) {
+	m := NewMetrics("flashsale-engine")
+	hr := &hijackRecorder{ResponseWriter: httptest.NewRecorder()}
+
+	handler := m.HTTPMetricsMiddleware(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("expected wrapped ResponseWriter to implement http.Hijacker")
+		}
+		_, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("unexpected hijack error: %v", err)
+		}
+	}))
+
+	handler.ServeHTTP(hr, httptest.NewRequest(http.MethodGet, "/ws/events/1", nil))
+	if !hr.hijacked {
+		t.Fatal("expected underlying Hijack to be called")
 	}
 }
