@@ -8,8 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    # Public mirror for frictionless local kind/k3d sync; switch to GitLab repo URL if preferred.
-    repoURL: https://github.com/Enormit/KubeTicket.git
+    repoURL: https://gitlab.com/Enormit/kubeticket.git
     targetRevision: main
     path: deploy/charts/kubeticket
     helm:

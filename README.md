@@ -8,8 +8,8 @@ Cloud-native **Flash Sale Event Ticketing** system built with **Golang microserv
    - Fast-path atomic seat locking via **Redis Lua Scripts** (`HELD` 300s → `CHECKOUT` 900s) and `ZSET` expiration sweeper.
    - Final ACID backstop in PostgreSQL via a partial unique index on active tickets (`PENDING`, `PAID`, `CHECKED_IN`).
 2. **Traffic Spike Protection:**
-   - **Virtual Waiting Room** (`ZADD NX` per user, adaptive admission rate, bound admission token) protects seat selection and DB pools.
-   - Asynchronous order ingestion via **Amazon SQS FIFO** (or Redis Streams locally) processed by **KEDA**-autoscaled workers.
+   - **Virtual Waiting Room** (`ZADD NX` per user, adaptive admission rate, bound admission token) uses a distributed Redis mutex (`SETNX` + Lua release) and shared per-second admission budget (`AdmitBatch`) so multi-Pod HPA replicas cannot over-admit.
+   - Asynchronous order ingestion via **Amazon SQS FIFO** (sharded across 64 deterministic `MessageGroupId`s per event via FNV-32a, or Redis Streams locally) processed concurrently by **KEDA**-autoscaled `order-worker` Pods.
 3. **Real-Time Seat Map & Resilient UX:**
    - **WebSocket Hub** fans out batched delta updates over **Redis Pub/Sub** with snapshot `seq` recovery and server-synced countdown timers.
 4. **Secure E-Tickets & Gate Check-In:**
@@ -37,17 +37,22 @@ kubeticket/
    ```bash
    cp .env.example .env
    ```
-2. Start local infrastructure (`postgres`, `redis`, `prometheus`, `grafana`):
+2. Start local stack (choose the profile you need):
    ```bash
-   make up
+   make up       # DB, Redis, 3 Go services, Nginx edge-gateway
+   make up-obs   # Backend stack + Prometheus & Grafana
+   make up-full  # Full stack (Backend + Next.js Frontend + Prometheus & Grafana)
    ```
 3. Run database migrations and seed data:
    ```bash
    make migrate-up
    make seed
    ```
-4. Check available automation targets:
+4. Run tests, race detector, and linters:
    ```bash
+   make test
+   make test-race
+   make lint
    make help
    ```
 
@@ -98,23 +103,52 @@ Runtime configuration from `services/pkg/config/config.go` and Next.js runtime r
 
 ### GitOps Delivery (`deploy/argocd/`)
 
-- [`deploy/argocd/application-local.yaml`](deploy/argocd/application-local.yaml): ArgoCD `Application` deploying `deploy/charts/kubeticket` with `values-local.yaml` into `kubeticket-local` (`automated` prune + self-heal).
+- [`deploy/argocd/application-local.yaml`](deploy/argocd/application-local.yaml): ArgoCD `Application` deploying `deploy/charts/kubeticket` with `values-local.yaml` from GitLab into `kubeticket-local` (`automated` prune + self-heal).
 - [`deploy/argocd/applicationset-eks.yaml`](deploy/argocd/applicationset-eks.yaml): ArgoCD `ApplicationSet` (`goTemplate` list generator) targeting `kubeticket-dev` (auto-sync) and `kubeticket-prod` (manual promotion sync), ignoring `/spec/replicas` drift for HPA/KEDA.
+
+### Observability & Monitoring (`deploy/monitoring/`)
+
+- [`deploy/monitoring/prometheus-local.yml`](deploy/monitoring/prometheus-local.yml): local Docker Compose scrape targets for `gateway-api:8080`, `flashsale-engine:8081`, and `order-worker:8082`.
+- [`deploy/monitoring/prometheus-rules.yaml`](deploy/monitoring/prometheus-rules.yaml): `PrometheusRule` alerts for 5xx error ratio, p95 latency, SQS worker retries/permanent failures, seat-lock contention, and Pod health (`CrashLoopBackOff`, `NotReady`) aligned with `services/pkg/observability/metrics.go`.
+- [`deploy/monitoring/alertmanager.yaml`](deploy/monitoring/alertmanager.yaml): Alertmanager routing and inhibition rules sending alerts to Telegram via a mounted secret token file.
+- [`deploy/monitoring/grafana-dashboard-kubeticket.json`](deploy/monitoring/grafana-dashboard-kubeticket.json): importable Grafana dashboard covering RED HTTP metrics, active WebSocket connections, seat lock conflicts, queue throughput (`ok`/`retry`/`permanent_error`), goroutines, and RSS memory.
 
 ### Helm & GitOps Implementation Progress
 
-- **Implemented:**
+- **Implemented (`deploy/` complete):**
   - `deploy/charts/kubeticket/`: `Chart.yaml`, `.helmignore`, `templates/_helpers.tpl`, `templates/configmap.yaml`, `templates/serviceaccount.yaml`, `templates/secret.yaml`, `templates/externalsecret.yaml`, `templates/deployment.yaml`, `templates/service.yaml`, `templates/ingress.yaml`, `templates/migration-job.yaml`, `templates/hpa.yaml`, `templates/scaledobject.yaml`, `templates/pdb.yaml`, `templates/servicemonitor.yaml`, `values.yaml`, `values-local.yaml`, `values-dev.yaml`, `values-prod.yaml`.
   - `deploy/argocd/`: `application-local.yaml`, `applicationset-eks.yaml`.
-- **Scaffolded (next):** `deploy/monitoring/` (`prometheus-local.yml`, `prometheus-rules.yaml`, `alertmanager.yaml`, `grafana-dashboard-kubeticket.json`).
+  - `deploy/monitoring/`: `prometheus-local.yml`, `prometheus-rules.yaml`, `alertmanager.yaml`, `grafana-dashboard-kubeticket.json`.
 
-Validate and render the chart locally with Helm:
+### Validate, Deploy & Observe (`deploy/`)
 
-```bash
-# Lint & render full local manifests (ConfigMaps, ServiceAccount, Secret, Deployments, Services, Ingress)
-helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
-helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
+1. **Validate & render Helm templates locally:**
+   ```bash
+   helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
+   helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
+   helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-prod.yaml
+   ```
 
-# Render Prod/EKS manifests (includes ExternalSecret & pre-install/upgrade migration Job)
-helm template kubeticket deploy/charts/kubeticket -f deploy/charts/kubeticket/values-prod.yaml
-```
+2. **Deploy directly with Helm (local `kind` / `k3d`):**
+   ```bash
+   helm upgrade --install kubeticket deploy/charts/kubeticket \
+     -n kubeticket-local --create-namespace \
+     -f deploy/charts/kubeticket/values-local.yaml
+   ```
+
+3. **Deploy via ArgoCD GitOps:**
+   ```bash
+   # Local single-cluster automated sync
+   kubectl apply -f deploy/argocd/application-local.yaml
+
+   # AWS EKS multi-environment ApplicationSet (dev auto-sync + prod manual promotion)
+   kubectl apply -f deploy/argocd/applicationset-eks.yaml
+   ```
+
+4. **Enable Monitoring & Alerting:**
+   ```bash
+   # Apply PrometheusRule alerts on cluster (requires kube-prometheus-stack)
+   kubectl apply -n monitoring -f deploy/monitoring/prometheus-rules.yaml
+   ```
+   - Mount your Telegram bot token into Alertmanager at `/etc/alertmanager/secrets/telegram-bot-token` and set `chat_id` in [`deploy/monitoring/alertmanager.yaml`](deploy/monitoring/alertmanager.yaml).
+   - Import [`deploy/monitoring/grafana-dashboard-kubeticket.json`](deploy/monitoring/grafana-dashboard-kubeticket.json) in Grafana (**Dashboards → Import**) to monitor HTTP RED metrics, WebSocket connections, seat lock conflicts, and worker queue throughput.
