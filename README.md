@@ -9,6 +9,7 @@ Cloud-native **Flash Sale Event Ticketing** system built with **Golang microserv
 - [Backend Architecture, ERD & Sequence Diagrams](#backend-architecture--data-design-services-db)
 - [Frontend Architecture & Real-Time UX](#frontend-architecture--real-time-ux-frontend)
 - [Kubernetes, Helm, GitOps & Observability](#kubernetes-deployment--helm-chart-design-deploy)
+- [Infrastructure as Code (`infra/`)](#infrastructure-as-code-infra)
 - [Load Testing (`k6`)](#load-testing-testsk6flashsale-loadjs)
 
 ## Core Architecture Guarantees
@@ -532,6 +533,30 @@ Runtime configuration from `services/pkg/config/config.go` and Next.js runtime r
    ```
    - Mount your Telegram bot token into Alertmanager at `/etc/alertmanager/secrets/telegram-bot-token` and set `chat_id` in [`deploy/monitoring/alertmanager.yaml`](deploy/monitoring/alertmanager.yaml).
    - Import [`deploy/monitoring/grafana-dashboard-kubeticket.json`](deploy/monitoring/grafana-dashboard-kubeticket.json) in Grafana (**Dashboards → Import**) to monitor HTTP RED metrics, WebSocket connections, seat lock conflicts, and worker queue throughput.
+
+## Infrastructure as Code (`infra/`)
+
+Terraform under `infra/` provisions AWS infrastructure (`ap-southeast-1`) using reusable modules and isolated environment roots:
+
+```text
+infra/
+├── bootstrap/         # One-time S3 remote-state bucket, DynamoDB lock table & optional GitLab OIDC role
+├── modules/
+│   ├── vpc/           # Multi-AZ VPC, public/private EKS subnets, FinOps/HA NAT, $0 S3 Gateway Endpoint
+│   ├── ecr/           # 5 ECR repositories with scan-on-push & lifecycle retention policies
+│   ├── data/          # SQS FIFO (orders.fifo + DLQ), ElastiCache Redis 7 (noeviction, TLS), Secrets Manager
+│   └── eks/           # EKS cluster, OIDC, Managed Node Groups, core addons & App/ESO/ALB IRSA roles
+└── envs/
+    ├── dev/           # FinOps dev stack (single NAT, SPOT nodes, 1-node Redis, MUTABLE ECR tags)
+    └── prod/          # Multi-AZ HA prod stack (per-AZ NAT, ON_DEMAND nodes, Multi-AZ Redis, IMMUTABLE ECR)
+```
+
+Bootstrap remote state once, then initialize an environment stack:
+
+```bash
+cd infra/bootstrap && cp terraform.tfvars.example terraform.tfvars && terraform init && terraform apply
+cd ../envs/dev && terraform init -backend-config="bucket=<STATE_BUCKET>" -backend-config="dynamodb_table=kubeticket-tfstate-locks" -backend-config="region=ap-southeast-1" && terraform plan
+```
 
 ## Load Testing (`tests/k6/flashsale-load.js`)
 
