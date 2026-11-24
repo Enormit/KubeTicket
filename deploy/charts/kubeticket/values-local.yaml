@@ -36,6 +36,10 @@ services:
       repository: "kubeticket/gateway-api"
       tag: "dev"
       pullPolicy: "IfNotPresent"
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
     resources:
       requests:
         cpu: "50m"
@@ -49,6 +53,10 @@ services:
       repository: "kubeticket/flashsale-engine"
       tag: "dev"
       pullPolicy: "IfNotPresent"
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
     resources:
       requests:
         cpu: "100m"
@@ -62,6 +70,10 @@ services:
       repository: "kubeticket/order-worker"
       tag: "dev"
       pullPolicy: "IfNotPresent"
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
     resources:
       requests:
         cpu: "50m"
@@ -75,6 +87,10 @@ services:
       repository: "kubeticket/frontend"
       tag: "dev"
       pullPolicy: "IfNotPresent"
+    autoscaling:
+      enabled: false
+    pdb:
+      enabled: false
     resources:
       requests:
         cpu: "50m"
@@ -102,3 +118,10 @@ migration:
     repository: "postgres"
     tag: "16-alpine"
     pullPolicy: "IfNotPresent"
+
+keda:
+  enabled: false
+
+monitoring:
+  serviceMonitor:
+    enabled: false

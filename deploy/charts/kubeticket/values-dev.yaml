@@ -28,11 +28,17 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/gateway-api"
       tag: "dev"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 4
   flashsale-engine:
     replicaCount: 2
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/flashsale-engine"
       tag: "dev"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 5
   order-worker:
     replicaCount: 2
     image:
@@ -43,6 +49,9 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/frontend"
       tag: "dev"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 4
 
 ingress:
   enabled: true
@@ -60,3 +69,12 @@ migration:
   image:
     repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/db-migrator"
     tag: "dev"
+
+keda:
+  enabled: true
+  minReplicaCount: 1
+  maxReplicaCount: 6
+
+monitoring:
+  serviceMonitor:
+    enabled: true

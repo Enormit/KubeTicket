@@ -31,6 +31,11 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/gateway-api"
       tag: "latest"
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 15
+    pdb:
+      minAvailable: 2
     resources:
       requests:
         cpu: "250m"
@@ -43,6 +48,11 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/flashsale-engine"
       tag: "latest"
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 25
+    pdb:
+      minAvailable: 2
     resources:
       requests:
         cpu: "500m"
@@ -55,6 +65,8 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/order-worker"
       tag: "latest"
+    pdb:
+      minAvailable: 1
     resources:
       requests:
         cpu: "250m"
@@ -67,6 +79,11 @@ services:
     image:
       repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/frontend"
       tag: "latest"
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 10
+    pdb:
+      minAvailable: 1
     resources:
       requests:
         cpu: "200m"
@@ -92,3 +109,14 @@ migration:
   image:
     repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/db-migrator"
     tag: "latest"
+
+keda:
+  enabled: true
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  sqs:
+    queueLength: 20
+
+monitoring:
+  serviceMonitor:
+    enabled: true

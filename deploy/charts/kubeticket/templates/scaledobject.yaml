@@ -1,0 +1,43 @@
+{{- if and .Values.keda.enabled .Values.services.order-worker.enabled }}
+{{- $fullname := include "kubeticket.fullname" . }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $fullname }}-order-worker
+  labels:
+    {{- include "kubeticket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order-worker
+spec:
+  scaleTargetRef:
+    name: {{ $fullname }}-order-worker
+  pollingInterval: {{ .Values.keda.pollingInterval | default 10 }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod | default 120 }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount | default 2 }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount | default 20 }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 15
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Percent
+              value: 25
+              periodSeconds: 60
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: {{ .Values.keda.sqs.queueURL | default .Values.config.SQS_ORDER_QUEUE_URL | quote }}
+        queueLength: {{ .Values.keda.sqs.queueLength | default 25 | quote }}
+        awsRegion: {{ .Values.config.AWS_REGION | quote }}
+        identityOwner: {{ .Values.keda.sqs.identityOwner | default "pod" | quote }}
+      {{- with .Values.keda.authenticationRef }}
+      authenticationRef:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

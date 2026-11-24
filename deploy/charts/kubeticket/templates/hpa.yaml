@@ -1,0 +1,47 @@
+{{- $fullname := include "kubeticket.fullname" . }}
+{{- $first := true }}
+{{- range $name := keys .Values.services | sortAlpha }}
+{{- $svc := index $.Values.services $name }}
+{{- $kedaControlsWorker := and (eq $name "order-worker") $.Values.keda.enabled }}
+{{- if and $svc.enabled $svc.autoscaling $svc.autoscaling.enabled (not $kedaControlsWorker) }}
+{{ if not $first }}
+---
+{{ end -}}
+{{- $first = false }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels:
+    {{- include "kubeticket.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullname }}-{{ $name }}
+  minReplicas: {{ $svc.autoscaling.minReplicas | default 2 }}
+  maxReplicas: {{ $svc.autoscaling.maxReplicas | default 10 }}
+  metrics:
+    {{- if $svc.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if $svc.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $svc.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  {{- with $svc.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
