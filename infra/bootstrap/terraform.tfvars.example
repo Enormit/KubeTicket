@@ -1,0 +1,6 @@
+aws_region          = "ap-southeast-1"
+project_name        = "kubeticket"
+state_bucket_name   = "" # Leave empty to auto-name: kubeticket-tfstate-<account_id>-ap-southeast-1
+lock_table_name     = "kubeticket-tfstate-locks"
+enable_gitlab_oidc  = false
+gitlab_project_path = "Enormit/kubeticket"
