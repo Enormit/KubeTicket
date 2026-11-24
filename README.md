@@ -2,6 +2,15 @@
 
 Cloud-native **Flash Sale Event Ticketing** system built with **Golang microservices**, **Next.js (TypeScript)**, **Redis**, **PostgreSQL (Neon / PgBouncer)**, **Amazon SQS FIFO**, and **Kubernetes GitOps (ArgoCD + Prometheus/Grafana)**.
 
+## Documentation Sections
+
+- [Core Architecture & EKS Blueprint](#core-architecture-guarantees)
+- [Quickstart & Service Topology](#quickstart-local-development)
+- [Backend Architecture, ERD & Sequence Diagrams](#backend-architecture--data-design-services-db)
+- [Frontend Architecture & Real-Time UX](#frontend-architecture--real-time-ux-frontend)
+- [Kubernetes, Helm, GitOps & Observability](#kubernetes-deployment--helm-chart-design-deploy)
+- [Load Testing (`k6`)](#load-testing-testsk6flashsale-loadjs)
+
 ## Core Architecture Guarantees
 
 1. **Zero Overselling (Defense-in-Depth):**
@@ -64,6 +73,377 @@ kubeticket/
 | `flashsale-engine` | `8081` | `/healthz`, `/readyz` | `/metrics` | `/ws`, `/api/v1/waiting-room`, `/api/v1/holds`, `/api/v1/checkout` |
 | `order-worker` | `8082` | `/healthz`, `/readyz` | `/metrics` | `/api/v1/webhooks`, `/api/v1/payments`, SQS FIFO consumer |
 | `frontend` | `3000` | `/api/runtime-config` | — | `/` (Next.js standalone UI + runtime proxy) |
+
+## Backend Architecture & Data Design (`services/`, `db/`)
+
+The backend lives in a Go workspace (`services/go.work`) consisting of three decoupled services (`gateway-api`, `flashsale-engine`, `order-worker`) sharing `services/pkg` (`config`, `database`, `middleware`, `models`, `observability`).
+
+### Microservices Architecture
+
+```mermaid
+flowchart TD
+    Client["Client Browser / k6 Load Tester"] -->|"HTTP & WebSocket"| Ingress["Edge Gateway (Nginx Local / AWS ALB Ingress)"]
+
+    Ingress -->|"/api/v1/auth, /events, /orders, /tickets, /admin"| GW["gateway-api (:8080)"]
+    Ingress -->|"/ws/events/{id}, /api/v1/waiting-room, /holds, /checkout"| FS["flashsale-engine (:8081)"]
+    Ingress -->|"/api/v1/webhooks/payment, /payments/sandbox"| OW["order-worker (:8082)"]
+
+    subgraph Shared["Shared Module (services/pkg)"]
+        Config["config (Env & Validation)"]
+        MW["middleware (JWT, CORS, RateLimit, Idempotency)"]
+        Obs["observability (slog JSON, OTel Trace, Prometheus Metrics)"]
+        DBPkg["database (pgxpool, Redis Client, Lua Registry)"]
+    end
+
+    GW -.-> Shared
+    FS -.-> Shared
+    OW -.-> Shared
+
+    FS -->|"Lua Scripts / ZSET / PubSub"| Redis[("Redis 7 (In-Memory Lock & Pub/Sub)")]
+    FS -->|"SQS FIFO 64 Shards (Prod) / Streams (Local)"| Queue[("Message Queue (SQS FIFO / Redis Streams)")]
+    Queue -->|"Long Polling / Consumer Group"| OW
+
+    GW -->|"Read / Auth / Ticket QR / Check-in"| PG[("PostgreSQL 16 (ACID Source of Truth)")]
+    FS -->|"Cold-Start Hydration"| PG
+    OW -->|"ACID Tx + Outbox Events"| PG
+    OW -->|"Outbox Dispatcher (SOLD / ORDER_CONFIRMED)"| Redis
+    Redis -->|"seat:updates:{event_id}"| FS
+```
+
+### Database Schema & ERD (`db/migrations/001_init.up.sql`)
+
+```mermaid
+erDiagram
+    users ||--o{ orders : "places"
+    users ||--o{ tickets : "owns"
+    users ||--o{ checkins : "scans"
+
+    events ||--|{ zones : "has"
+    events ||--|{ seats : "contains"
+    events ||--o{ orders : "receives"
+    events ||--o{ tickets : "issues"
+    events ||--o{ checkins : "records"
+
+    zones ||--|{ seats : "groups"
+    zones ||--o{ order_items : "prices"
+
+    orders ||--|{ order_items : "contains"
+    orders ||--|{ tickets : "generates"
+    orders ||--o{ payments : "settled_by"
+
+    seats ||--o{ order_items : "booked_in"
+    seats ||--o{ tickets : "assigned_to"
+
+    tickets ||--o| checkins : "checked_in_once"
+
+    users {
+        uuid id PK
+        text email UK
+        text password_hash
+        text full_name
+        text role "USER | ADMIN"
+    }
+
+    events {
+        uuid id PK
+        text slug UK
+        text title
+        text venue
+        timestamptz starts_at
+        timestamptz sale_starts_at
+        int max_seats_per_order "1..10"
+        text status "DRAFT | UPCOMING | ON_SALE | SOLD_OUT | ENDED"
+    }
+
+    zones {
+        uuid id PK
+        uuid event_id FK
+        text code
+        text name
+        bigint price_cents
+        text currency
+        jsonb svg_bounds
+    }
+
+    seats {
+        uuid id PK
+        uuid event_id FK
+        uuid zone_id FK
+        text row_label
+        int seat_number
+        text label
+        double pos_x
+        double pos_y
+        text status "AVAILABLE | SOLD | BLOCKED"
+    }
+
+    orders {
+        uuid id PK
+        uuid user_id FK
+        uuid event_id FK
+        text hold_token
+        text status "PENDING | COMPLETED | EXPIRED | CANCELLED | REFUNDED_EXPIRED"
+        bigint total_cents
+        text payment_provider
+        timestamptz expires_at
+    }
+
+    order_items {
+        uuid id PK
+        uuid order_id FK
+        uuid seat_id FK
+        uuid zone_id FK
+        bigint unit_price_cents
+    }
+
+    tickets {
+        uuid id PK
+        uuid order_id FK
+        uuid user_id FK
+        uuid event_id FK
+        uuid seat_id FK
+        text ticket_code UK
+        text status "PENDING | PAID | CHECKED_IN | CANCELLED | REFUNDED"
+    }
+
+    payments {
+        uuid id PK
+        uuid order_id FK
+        text provider
+        text provider_payment_id
+        bigint amount_cents
+        text status "INITIATED | SUCCEEDED | FAILED | REFUNDED"
+    }
+
+    checkins {
+        uuid id PK
+        uuid ticket_id FK "UNIQUE"
+        uuid event_id FK
+        uuid scanned_by FK
+        text gate
+        timestamptz checked_in_at
+    }
+
+    idempotency_keys {
+        text key PK
+        uuid user_id PK
+        text endpoint PK
+        text request_hash
+        int status_code
+        timestamptz expires_at
+    }
+
+    webhook_events {
+        text provider PK
+        text provider_event_id PK
+        text event_type
+        timestamptz processed_at
+    }
+
+    outbox_events {
+        bigserial id PK
+        text aggregate_type
+        uuid aggregate_id
+        text event_type
+        jsonb payload
+        timestamptz published_at
+    }
+```
+
+Key ACID & indexing guarantees:
+- **Active ticket lock (`ux_tickets_active_event_seat`):** partial unique index on `tickets (event_id, seat_id) WHERE status IN ('PENDING', 'PAID', 'CHECKED_IN')`, allowing canceled/refunded seats to be re-sold while strictly preventing double-booking.
+- **Duplicate scan prevention (`checkins`):** `UNIQUE (ticket_id)` paired with `INSERT ... ON CONFLICT (ticket_id) DO NOTHING`.
+- **Webhook & API deduplication:** composite PK `(provider, provider_event_id)` on `webhook_events` and `(user_id, endpoint, key)` on `idempotency_keys`.
+- **Non-blocking outbox polling (`idx_outbox_unpublished`):** partial index `WHERE published_at IS NULL` queried via `FOR UPDATE SKIP LOCKED`.
+
+### Core Sequence Diagrams
+
+#### 1. Virtual Waiting Room & Atomic Seat Hold
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User
+    participant FE as Frontend / Client
+    participant FS as flashsale-engine
+    participant Redis as Redis (Lua & PubSub)
+    participant Hub as WebSocket Hub
+
+    User->>FE: Join event queue
+    FE->>FS: POST /api/v1/waiting-room/join (JWT + TurnstileToken)
+    FS->>FS: Verify Cloudflare Turnstile (if enabled)
+    FS->>Redis: ZADD NX waiting:queue:{event_id} (timestamp, user_id)
+    FS-->>FE: QueueStatus (position, ahead_count, admitted)
+
+    loop Poll queue status until admitted
+        FE->>FS: GET /api/v1/waiting-room/status?event_id=...
+        FS->>Redis: SETNX waiting:admit:lock:{event_id} (5s distributed mutex)
+        Note over FS,Redis: AdmitBatch enforces shared 1s admission budget across Pods
+        FS-->>FE: admitted=true + event-bound admission_token
+    end
+
+    User->>FE: Select up to 4 seats & click Hold
+    FE->>FS: POST /api/v1/holds (X-Admission-Token, Idempotency-Key)
+    FS->>Redis: EVAL acquire_holds.lua (TTL 300s, ZADD hold_zset, INCR seq)
+    alt Any seat already held or sold
+        Redis-->>FS: Conflict
+        FS-->>FE: 409 Conflict (seat_conflict)
+    else All requested seats available
+        Redis-->>FS: OK + seq + hold_token
+        FS->>Redis: PUBLISH seat:updates:{event_id} (DELTA HELD)
+        FS-->>FE: 200 OK (hold_token, expires_at, seq)
+        Redis-->>Hub: Deliver DELTA via PSubscribe
+        Hub-->>FE: Broadcast batched WebSocket DELTA (75ms flush)
+    end
+```
+
+#### 2. Async Checkout & ACID Order Persistence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FE as Frontend / Client
+    participant FS as flashsale-engine
+    participant Redis as Redis
+    participant Queue as SQS FIFO / Redis Streams
+    participant OW as order-worker
+    participant PG as PostgreSQL
+
+    FE->>FS: POST /api/v1/checkout/submit (hold_token, seat_ids, Idempotency-Key)
+    FS->>Redis: EVAL promote_checkout.lua (HELD -> CHECKOUT, TTL 900s, INCR seq)
+    alt Hold expired or wrong owner
+        Redis-->>FS: ErrHoldExpired
+        FS-->>FE: 409 Conflict (hold_expired)
+    else Hold promoted
+        FS->>Queue: Enqueue OrderQueueMessage (64 SQS MessageGroupId shards/event)
+        FS->>Redis: PUBLISH seat:updates:{event_id} (DELTA CHECKOUT)
+        FS-->>FE: 202 Accepted (order_id, status=PENDING, expires_at)
+    end
+
+    Queue->>OW: Consume OrderQueueMessage (at-least-once)
+    OW->>PG: BEGIN TX + Check orders.id idempotency
+    OW->>PG: SELECT seats JOIN zones FOR UPDATE OF s (authoritative pricing)
+    OW->>PG: INSERT orders (PENDING) + order_items + tickets (PENDING)
+    OW->>PG: COMMIT TX
+    OW->>Queue: DeleteMessage (ACK)
+```
+
+#### 3. Payment Webhook Settlement, Late-Webhook Refund & Outbox Fan-out
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Pay as Payment Gateway (Stripe / Sandbox)
+    participant OW as order-worker
+    participant PG as PostgreSQL
+    participant Outbox as outbox.Dispatcher
+    participant Redis as Redis & WebSocket
+
+    Pay->>OW: POST /api/v1/webhooks/payment (HMAC Signature + Raw Body)
+    OW->>OW: Verify HMAC signature & timestamp tolerance
+    OW->>PG: BEGIN TX + INSERT webhook_events ON CONFLICT DO NOTHING
+    alt Duplicate webhook event
+        OW-->>Pay: 200 OK (duplicate_ignored)
+    else First-time settlement
+        OW->>PG: SELECT orders FOR UPDATE
+        alt Order already EXPIRED or CANCELLED
+            OW->>PG: INSERT payments (REFUNDED) + UPDATE orders (REFUNDED_EXPIRED)
+            OW->>PG: COMMIT TX
+            OW->>Pay: Trigger RefundPayment API
+            OW-->>Pay: 200 OK (refunded_expired)
+        else Order is PENDING
+            OW->>PG: UPDATE orders=COMPLETED, tickets=PAID, seats=SOLD
+            OW->>PG: INSERT payments (SUCCEEDED) + outbox_events (ORDER_COMPLETED)
+            OW->>PG: COMMIT TX + Outbox.Notify()
+            OW-->>Pay: 200 OK (completed)
+        end
+    end
+
+    Outbox->>PG: SELECT outbox_events WHERE published_at IS NULL FOR UPDATE SKIP LOCKED
+    Outbox->>Redis: SET seat:lock:{event}:{seat} = SOLD + ZREM hold_zset
+    Outbox->>Redis: PUBLISH seat:updates:{event_id} (DELTA SOLD + ORDER_CONFIRMED)
+    Outbox->>PG: UPDATE outbox_events SET published_at = NOW()
+```
+
+#### 4. Signed QR E-Ticket & Atomic Gate Check-In
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Fan as Attendee
+    actor Staff as Gate Staff
+    participant GW as gateway-api
+    participant PG as PostgreSQL
+
+    Fan->>GW: GET /api/v1/tickets/{id}/qr (JWT)
+    GW->>PG: Verify ticket ownership & status IN (PAID, CHECKED_IN)
+    GW->>GW: Sign payload (ticket_id|event_id|exp|nonce) with HMAC-SHA256
+    GW-->>Fan: 200 OK (Base64URL token + QR payload)
+
+    Staff->>GW: POST /api/v1/admin/checkin (Admin JWT + qr_token + gate)
+    GW->>GW: Decode Base64URL + constant-time hmac.Equal() + verify exp
+    GW->>PG: BEGIN TX + SELECT tickets FOR UPDATE
+    GW->>PG: INSERT INTO checkins (ticket_id, ...) ON CONFLICT DO NOTHING
+    alt Already checked in
+        GW-->>Staff: 409 Conflict (already_checked_in)
+    else Valid first scan
+        GW->>PG: UPDATE tickets SET status = 'CHECKED_IN' + COMMIT TX
+        GW-->>Staff: 200 OK (checked_in_at, gate)
+    end
+```
+
+### Resilience Patterns & System Advantages
+
+- **Cold-Start Redis Hydration (`HydrateFromPostgres`):** `flashsale-engine` blocks `/readyz` until all active `PENDING`, `PAID`, and `CHECKED_IN` seats are restored from PostgreSQL into Redis.
+- **Distributed Expiry Sweeper & Order Reconciler:** `SweepExpiredHolds` acquires a short per-event Redis leader lock (`1500ms`) to release expired `HELD` seats via `expire_seat.lua`, while `ExpirePendingOrders` cancels unpaid `PENDING` orders after `CHECKOUT_HOLD_TTL_SECONDS`.
+- **Two-Layer Rate Limiting & Idempotency:** Redis Lua fixed-window quotas protect auth (`30/min`), waiting-room join (`20/min`), holds (`40/min`), and checkout (`15/min`), paired with mandatory `Idempotency-Key` headers on mutating flash-sale endpoints.
+- **Lightweight Distroless Containers & Full Observability:** All three Go binaries compile statically (`CGO_ENABLED=0`) onto `gcr.io/distroless/static-debian12:nonroot`, exposing structured JSON logs with OpenTelemetry `trace_id` and Prometheus `/metrics` (with `http.Hijacker` preserved for WebSocket upgrades).
+
+## Frontend Architecture & Real-Time UX (`frontend/`)
+
+The web client is a **Next.js 15 (App Router, `output: "standalone"`) + React 19 + TypeScript + TailwindCSS + Zustand 5** application designed with the *Stadium Turnstile* UI system and zero build-time environment lock-in.
+
+### Frontend Component & Data Flow
+
+```mermaid
+flowchart TD
+    Browser["Browser (React 19 + Zustand)"] -->|"Guard /waiting-room, /events/*/seats, /checkout, /tickets, /admin"| MW["Next.js Middleware (kubeticket_token cookie)"]
+    Browser -->|"GET /api/runtime-config"| RC["Runtime Config API (force-dynamic)"]
+    Browser -->|"REST Fallback (/api/v1/*)"| Proxy["BFF Proxy Route (BACKEND_INTERNAL_URL)"]
+    Browser -->|"WebSocket (/ws/events/{id})"| WSHook["useSeatSocket (Backoff + Jitter + PING)"]
+
+    WSHook -->|"SYNC / DELTA / ORDER_CONFIRMED"| Store["Zustand Seat Store (seatsById, seq, serverOffsetMs)"]
+    Store -->|"Zone <= 800 seats"| SVG["SVGSeatNode (Memoized Per-Seat Selectors)"]
+    Store -->|"Zone > 800 seats (CANVAS_THRESHOLD)"| Canvas["CanvasSeatRenderer (HTML5 Canvas)"]
+    Store --> Timer["SeatTimer (Server-Synced Clock Offset)"]
+
+    Browser <-->|"AUTH_CHANGED / ADMISSION_UPDATED / CART_UPDATED"| BC["BroadcastChannel (kubeticket_sync)"]
+    Admin["Admin Gate Scanner (/admin)"] -->|"html5-qrcode + 1500ms cooldown"| Debounce["shouldProcessQRScan"]
+```
+
+### App Router Pages & Auth Protection
+
+| Route | Protection | Key Functionality |
+| --- | --- | --- |
+| `/`, `/login`, `/register` | Public | Event catalog discovery, JWT login/register (`kubeticket_token` cookie) |
+| `/waiting-room` | Middleware (`kubeticket_token`) | Queue join + polling until `admitted=true`, stores event-bound `admission_token` in `sessionStorage` |
+| `/events/[id]/seats` | Middleware + Admission Token | 2-tier seat map, optimistic hold/release (`POST /holds`, `DELETE /holds/{id}`), live WebSocket updates |
+| `/checkout`, `/checkout/result` | Middleware | Order submission (`POST /checkout/submit`), async order status polling & sandbox settlement |
+| `/tickets` | Middleware | Signed `HMAC-SHA256` QR e-ticket display rendered client-side via `qrcode` |
+| `/admin` | Middleware + `ADMIN` role | Gate QR scanner (`html5-qrcode`) with `shouldProcessQRScan` (`1500ms` duplicate-frame cooldown) |
+
+### Real-Time Seat Map & Resilience Patterns
+
+1. **Runtime-Configurable Immutable Container (`/api/runtime-config`):**
+   - Next.js exposes `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` dynamically via `export const dynamic = "force-dynamic"`, while `/api/v1/[...path]` forwards server-side requests (`authorization`, `cookie`, `idempotency-key`, `x-admission-token`) to `BACKEND_INTERNAL_URL`. The exact same Docker image runs across local Compose, `kind`/`k3d`, and EKS without rebuilding.
+2. **Adaptive 2-Tier Seat Rendering (`SeatMap.tsx`):**
+   - Users pick a venue zone first, then view individual seats. Zones up to **`CANVAS_THRESHOLD = 800` seats** render interactive `SVGSeatNode` elements with fine-grained Zustand selectors (`useSeatStatus`, `useIsMyHeldSeat`, `useIsLockingSeat`) so updating one seat does not re-render unaffected nodes. Zones above 800 seats switch automatically to `CanvasSeatRenderer` (`<canvas>`).
+3. **Sequence Gap Recovery & Jittered Reconnect (`use-seat-socket.ts`, `ws-backoff.ts`):**
+   - Every WebSocket `SYNC` frame compares `msg.seq` against `useSeatStore.getState().seq`; if a gap is detected (`msg.seq > currentSeq`) or the browser tab regains focus (`visibilitychange` / `online`), the client triggers `resyncSnapshot()`.
+   - Reconnections use exponential backoff with full jitter (`baseMs = 500`, `capMs = 30_000`, floor `100ms`) plus a 20s `PING` heartbeat to prevent thundering-herd reconnect spikes.
+4. **Server-Synced Countdown & Multi-Tab Coordination (`timer.ts`, `multi-tab.ts`):**
+   - `computeServerOffsetMs` tracks `server_now - client_now` so `SeatTimer` (`computeRemainingSeconds`) stays accurate despite client clock skew.
+   - `BroadcastChannel("kubeticket_sync")` coordinates `AUTH_CHANGED`, `ADMISSION_UPDATED`, and `CART_UPDATED` across open tabs.
 
 ## Kubernetes Deployment & Helm Chart Design (`deploy/`)
 
@@ -152,3 +532,15 @@ Runtime configuration from `services/pkg/config/config.go` and Next.js runtime r
    ```
    - Mount your Telegram bot token into Alertmanager at `/etc/alertmanager/secrets/telegram-bot-token` and set `chat_id` in [`deploy/monitoring/alertmanager.yaml`](deploy/monitoring/alertmanager.yaml).
    - Import [`deploy/monitoring/grafana-dashboard-kubeticket.json`](deploy/monitoring/grafana-dashboard-kubeticket.json) in Grafana (**Dashboards → Import**) to monitor HTTP RED metrics, WebSocket connections, seat lock conflicts, and worker queue throughput.
+
+## Load Testing (`tests/k6/flashsale-load.js`)
+
+Run concurrent flash-sale load tests against the local stack (or an Ingress endpoint) with `k6` using three concurrent scenarios (`browse_and_snapshot`, `ws_spectators`, and `flashsale_rush` with waiting-room admission, seat-lock contention, hold release, and async checkout):
+
+```bash
+# Default 30s flash-sale smoke & contention test
+k6 run tests/k6/flashsale-load.js
+
+# Higher load without permanently consuming seeded seats (CHECKOUT_RATIO=0)
+k6 run -e BROWSE_VUS=20 -e WS_VUS=15 -e RUSH_VUS=25 -e DURATION=60s -e CHECKOUT_RATIO=0 tests/k6/flashsale-load.js
+```
