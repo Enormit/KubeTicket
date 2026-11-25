@@ -45,3 +45,21 @@ variable "node_max_size" {
   type        = number
   default     = 4
 }
+
+variable "route53_zone_name" {
+  description = "Existing Route53 public hosted zone name (leave empty to skip ACM/Route53)"
+  type        = string
+  default     = ""
+}
+
+variable "domain_name" {
+  description = "Application domain for dev ALB HTTPS (e.g. dev.enormitpham.me)"
+  type        = string
+  default     = ""
+}
+
+variable "validate_acm_certificate" {
+  description = "Wait for ACM DNS validation to complete during terraform apply"
+  type        = bool
+  default     = true
+}
