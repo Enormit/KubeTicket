@@ -568,4 +568,32 @@ k6 run tests/k6/flashsale-load.js
 
 # Higher load without permanently consuming seeded seats (CHECKOUT_RATIO=0)
 k6 run -e BROWSE_VUS=20 -e WS_VUS=15 -e RUSH_VUS=25 -e DURATION=60s -e CHECKOUT_RATIO=0 tests/k6/flashsale-load.js
+
+# Live AWS EKS dev load test (5m total, supports WS_ORIGIN for HTTPS/WSS CORS validation)
+BASE_URL=https://dev.enormitpham.me \
+WS_URL=wss://dev.enormitpham.me \
+WS_ORIGIN=https://dev.enormitpham.me \
+DURATION=290s BROWSE_VUS=10 WS_VUS=8 RUSH_VUS=15 HOT_POOL_SIZE=40 CHECKOUT_RATIO=0.05 \
+k6 run tests/k6/flashsale-load.js
 ```
+
+### Live AWS EKS Dev Load Test Benchmark (5 Minutes, 33 VUs)
+
+Executed against `https://dev.enormitpham.me` (AWS EKS `kubeticket-dev-eks` on `2x t3.medium` Spot nodes, AWS ALB HTTPS, ElastiCache Redis 7 TLS, SQS FIFO, Neon Serverless PostgreSQL) with Prometheus + Grafana scraping live service `/metrics`:
+
+| Metric / Threshold | Observed Result | Notes |
+| --- | --- | --- |
+| Overall k6 Exit / Thresholds | **PASS (`0`)** | `http_req_duration p(95) < 1000ms`, `http_req_failed < 5%` |
+| Total Iterations (`5m01.8s`) | `8,205` (`27.19/s`) | `0` interrupted across `33` concurrent VUs (`10` browse, `8` WS, `15` rush) |
+| HTTP Requests (`http_reqs`) | `13,133` (`43.52 req/s`) | `526 MB` received (`1.7 MB/s`) |
+| HTTP Duration (`http_req_duration`) | `avg 71.53 ms` / `med 52.23 ms` / **`p95 147.28 ms`** | `p90 = 113.85 ms`, `max = 1.36 s` |
+| HTTP Failure Rate (`http_req_failed`) | **`3.54%`** (`465 / 13,133`) | `0` server `5xx` errors (`465` rate-limit `429` responses during concentrated hold rush) |
+| Seat Lock Acquisitions (`200`) | `896` (`2.97/s`) | Atomic Redis Lua seat holds |
+| Seat Lock Conflicts (`409`) | `2,028` (`6.72/s`) | Peak `8.87 ops/s` in Prometheus (`0` overselling) |
+| Async Checkouts (`202` -> SQS FIFO) | `39` (`0.13/s`) | Processed asynchronously by `order-worker` |
+| WebSocket (`wss://.../ws/events/...`) | `408` sessions (`100%` `101`) | `7,489` delta messages (`24.82/s`), `ws_connecting p95 = 311.34 ms`, `8` concurrent active sockets |
+| EKS Peak Utilization (`kubectl top`) | Nodes `13%` & `7%` CPU | Memory `76%` (`2507Mi`) & `62%` (`2055Mi`); HPA `gateway-api` peaked at `41%/70%` CPU (`2/4` pods) |
+
+> **Note on Grafana `HTTP 5xx Error Rate (%)`:** The panel displays `No data` because zero HTTP `5xx` responses occurred during the test (`http_requests_total{status=~"5.."}` has no emitted time series).
+
+![KubeTicket EKS Dev Grafana 5-Minute Load Test](./Screenshot.png)

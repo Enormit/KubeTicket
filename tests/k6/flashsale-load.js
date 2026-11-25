@@ -5,6 +5,7 @@ import { Counter } from "k6/metrics";
 
 const BASE_URL = (__ENV.BASE_URL || "http://localhost:8080").replace(/\/+$/, "");
 const WS_URL = (__ENV.WS_URL || BASE_URL.replace(/^http/, "ws")).replace(/\/+$/, "");
+const WS_ORIGIN = __ENV.WS_ORIGIN || BASE_URL;
 const EVENT_ID = __ENV.EVENT_ID || "11111111-1111-1111-1111-111111111101";
 const HOT_POOL_SIZE = Number(__ENV.HOT_POOL_SIZE || 20);
 const CHECKOUT_RATIO = Number(__ENV.CHECKOUT_RATIO || 0.1);
@@ -159,7 +160,7 @@ export function browseFlow() {
 
 export function wsFlow() {
   const url = `${WS_URL}/ws/events/${EVENT_ID}`;
-  const res = ws.connect(url, { headers: { Origin: "http://localhost:3000" } }, function (socket) {
+  const res = ws.connect(url, { headers: { Origin: WS_ORIGIN } }, function (socket) {
     socket.on("open", () => {
       socket.setTimeout(() => socket.close(), 5000);
     });
