@@ -1,6 +1,6 @@
 serviceAccount:
   annotations:
-    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/kubeticket-dev-app"
+    eks.amazonaws.com/role-arn: "arn:aws:iam::755272426779:role/kubeticket-dev-app"
 
 externalSecrets:
   enabled: true
@@ -14,19 +14,19 @@ config:
   DB_SIMPLE_PROTOCOL: "true"
   REDIS_MODE: "standalone"
   COOKIE_SECURE: "true"
-  SQS_ORDER_QUEUE_URL: ""
-  CORS_ALLOWED_ORIGINS: "https://dev.kubeticket.example.com"
+  SQS_ORDER_QUEUE_URL: "https://sqs.ap-southeast-1.amazonaws.com/755272426779/kubeticket-dev-orders.fifo"
+  CORS_ALLOWED_ORIGINS: "https://dev.enormitpham.me"
 
 frontendConfig:
   NEXT_PUBLIC_API_URL: ""
-  NEXT_PUBLIC_WS_URL: "wss://dev.kubeticket.example.com"
+  NEXT_PUBLIC_WS_URL: "wss://dev.enormitpham.me"
   BACKEND_INTERNAL_URL: ""
 
 services:
   gateway-api:
     replicaCount: 2
     image:
-      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/gateway-api"
+      repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/gateway-api"
       tag: "dev"
     autoscaling:
       minReplicas: 2
@@ -34,7 +34,7 @@ services:
   flashsale-engine:
     replicaCount: 2
     image:
-      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/flashsale-engine"
+      repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/flashsale-engine"
       tag: "dev"
     autoscaling:
       minReplicas: 2
@@ -42,12 +42,12 @@ services:
   order-worker:
     replicaCount: 2
     image:
-      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/order-worker"
+      repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/order-worker"
       tag: "dev"
   frontend:
     replicaCount: 2
     image:
-      repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/frontend"
+      repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/frontend"
       tag: "dev"
     autoscaling:
       minReplicas: 2
@@ -59,21 +59,25 @@ ingress:
   annotations:
     alb.ingress.kubernetes.io/scheme: "internet-facing"
     alb.ingress.kubernetes.io/target-type: "ip"
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-southeast-1:755272426779:certificate/17d62362-b78b-4141-a7ee-d005a028981f"
     alb.ingress.kubernetes.io/healthcheck-path: "/api/runtime-config"
   hosts:
-    - "dev.kubeticket.example.com"
+    - "dev.enormitpham.me"
 
 migration:
   enabled: true
   image:
-    repository: "ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket/db-migrator"
+    repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/db-migrator"
     tag: "dev"
 
 keda:
   enabled: true
   minReplicaCount: 1
   maxReplicaCount: 6
+  sqs:
+    queueURL: "https://sqs.ap-southeast-1.amazonaws.com/755272426779/kubeticket-dev-orders.fifo"
 
 monitoring:
   serviceMonitor:

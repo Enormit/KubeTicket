@@ -144,6 +144,10 @@ jobs:
           docker build -f frontend/Dockerfile -t "$FE_IMAGE:$TAG" -t "$FE_IMAGE:dev" frontend/
           docker push "$FE_IMAGE:$TAG"
           docker push "$FE_IMAGE:dev"
+          MIG_IMAGE="$ECR_REGISTRY/kubeticket-dev/db-migrator"
+          docker build -f db/Dockerfile.migrator -t "$MIG_IMAGE:$TAG" -t "$MIG_IMAGE:dev" db/
+          docker push "$MIG_IMAGE:$TAG"
+          docker push "$MIG_IMAGE:dev"
 
   update-gitops-dev:
     name: Update GitOps Dev Image Tags
@@ -163,7 +167,7 @@ jobs:
         run: |
           TAG="${SHORT_SHA::8}"
           awk -v tag="$TAG" '
-            /kubeticket(-dev)?\/(gateway-api|flashsale-engine|order-worker|frontend)/ { update=1 }
+            /kubeticket(-dev)?\/(gateway-api|flashsale-engine|order-worker|frontend|db-migrator)/ { update=1 }
             update && /tag:/ { sub(/tag: ".*"/, "tag: \"" tag "\""); update=0 }
             { print }
           ' deploy/charts/kubeticket/values-dev.yaml > /tmp/values-dev.yaml
