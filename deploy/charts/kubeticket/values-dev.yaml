@@ -82,4 +82,4 @@ keda:
 
 monitoring:
   serviceMonitor:
-    enabled: false # Enable after installing kube-prometheus-stack in the cluster
+    enabled: true
