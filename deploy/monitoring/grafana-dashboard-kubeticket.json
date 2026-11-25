@@ -57,7 +57,7 @@
       "id": 2,
       "targets": [
         {
-          "expr": "sum by (service) (rate(http_requests_total{status=~\"5..\"}[1m])) / clamp_min(sum by (service) (rate(http_requests_total[1m])), 0.001) * 100",
+          "expr": "((sum by (service) (rate(http_requests_total{status=~\"5..\"}[1m]))) or (0 * sum by (service) (rate(http_requests_total[1m])))) / clamp_min(sum by (service) (rate(http_requests_total[1m])), 0.001) * 100",
           "legendFormat": "{{service}} 5xx %",
           "refId": "A"
         }
@@ -183,8 +183,8 @@
       "id": 7,
       "targets": [
         {
-          "expr": "go_goroutines{service=~\"gateway-api|flashsale-engine|order-worker\"}",
-          "legendFormat": "{{service}} goroutines",
+          "expr": "go_goroutines{job=~\"gateway-api|flashsale-engine|order-worker\"} or go_goroutines{service=~\"gateway-api|flashsale-engine|order-worker\"}",
+          "legendFormat": "{{job}} goroutines",
           "refId": "A"
         }
       ],
@@ -206,8 +206,8 @@
       "id": 8,
       "targets": [
         {
-          "expr": "process_resident_memory_bytes{service=~\"gateway-api|flashsale-engine|order-worker\"}",
-          "legendFormat": "{{service}} RSS",
+          "expr": "process_resident_memory_bytes{job=~\"gateway-api|flashsale-engine|order-worker\"} or process_resident_memory_bytes{service=~\"gateway-api|flashsale-engine|order-worker\"}",
+          "legendFormat": "{{job}} RSS",
           "refId": "A"
         }
       ],

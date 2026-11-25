@@ -74,11 +74,19 @@ migration:
     tag: "cd581dc4"
 
 keda:
-  enabled: false # Requires a dedicated IAM role + TriggerAuthentication for keda-operator
+  enabled: true
+  pollingInterval: 10
+  cooldownPeriod: 60
   minReplicaCount: 1
   maxReplicaCount: 6
+  podIdentityProvider: "aws"
+  podIdentityOwner: "keda"
   sqs:
     queueURL: "https://sqs.ap-southeast-1.amazonaws.com/755272426779/kubeticket-dev-orders.fifo"
+    queueLength: 5
+    identityOwner: "operator"
+  authenticationRef:
+    name: "kubeticket-dev-aws-sqs-auth"
 
 monitoring:
   serviceMonitor:

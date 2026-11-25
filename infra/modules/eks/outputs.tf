@@ -27,3 +27,8 @@ output "alb_controller_role_arn" {
   description = "IAM Role ARN for AWS Load Balancer Controller"
   value       = aws_iam_role.alb_controller.arn
 }
+
+output "keda_irsa_role_arn" {
+  description = "IAM Role ARN for KEDA operator SQS scaling"
+  value       = aws_iam_role.keda.arn
+}

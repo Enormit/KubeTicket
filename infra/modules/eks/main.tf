@@ -259,3 +259,69 @@ resource "aws_iam_role_policy_attachment" "alb_controller" {
   role       = aws_iam_role.alb_controller.name
   policy_arn = aws_iam_policy.alb_controller.arn
 }
+
+# 8. KEDA Operator IRSA Role (SQS queue depth polling for order-worker autoscaling)
+data "aws_iam_policy_document" "keda_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_provider_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_provider_host}:sub"
+      values   = ["system:serviceaccount:${var.keda_namespace}:${var.keda_service_account_name}"]
+    }
+  }
+}
+
+resource "aws_iam_role" "keda" {
+  name               = "${var.name_prefix}-keda-operator"
+  assume_role_policy = data.aws_iam_policy_document.keda_assume_role.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "keda_sqs" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:GetQueueAttributes",
+      "sqs:GetQueueUrl",
+    ]
+    resources = [var.sqs_queue_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "keda_sqs" {
+  name   = "${var.name_prefix}-keda-sqs"
+  role   = aws_iam_role.keda.id
+  policy = data.aws_iam_policy_document.keda_sqs.json
+}
+
+# 9. Optional Declarative EKS Cluster Admin Access Entries
+resource "aws_eks_access_entry" "admins" {
+  for_each = toset(var.admin_principal_arns)
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  type          = "STANDARD"
+}
+
+resource "aws_eks_access_policy_association" "admins" {
+  for_each = aws_eks_access_entry.admins
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value.principal_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}

@@ -34,6 +34,10 @@ output "alb_controller_role_arn" {
   value = module.eks.alb_controller_role_arn
 }
 
+output "keda_irsa_role_arn" {
+  value = module.eks.keda_irsa_role_arn
+}
+
 output "ecr_registry" {
   value = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
 }

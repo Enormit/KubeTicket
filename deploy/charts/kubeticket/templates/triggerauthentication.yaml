@@ -1,0 +1,17 @@
+{{- $worker := index .Values.services "order-worker" }}
+{{- if and .Values.keda.enabled $worker $worker.enabled .Values.keda.podIdentityProvider }}
+{{- $fullname := include "kubeticket.fullname" . }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $fullname }}-aws-sqs-auth
+  labels:
+    {{- include "kubeticket.labels" . | nindent 4 }}
+    app.kubernetes.io/component: order-worker
+spec:
+  podIdentity:
+    provider: {{ .Values.keda.podIdentityProvider | quote }}
+    {{- if .Values.keda.podIdentityOwner }}
+    identityOwner: {{ .Values.keda.podIdentityOwner | quote }}
+    {{- end }}
+{{- end }}

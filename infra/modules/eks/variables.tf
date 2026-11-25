@@ -80,6 +80,24 @@ variable "secrets_manager_arn" {
   type        = string
 }
 
+variable "keda_namespace" {
+  description = "Kubernetes namespace where KEDA operator runs"
+  type        = string
+  default     = "keda"
+}
+
+variable "keda_service_account_name" {
+  description = "Kubernetes ServiceAccount name used by KEDA operator"
+  type        = string
+  default     = "keda-operator"
+}
+
+variable "admin_principal_arns" {
+  description = "Optional IAM user/role ARNs granted EKS cluster admin access entries"
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Additional tags applied to EKS and IAM resources"
   type        = map(string)
