@@ -27,7 +27,7 @@ services:
     replicaCount: 2
     image:
       repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/gateway-api"
-      tag: "dev"
+      tag: "cd581dc4"
     autoscaling:
       minReplicas: 2
       maxReplicas: 4
@@ -35,7 +35,7 @@ services:
     replicaCount: 2
     image:
       repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/flashsale-engine"
-      tag: "dev"
+      tag: "cd581dc4"
     autoscaling:
       minReplicas: 2
       maxReplicas: 5
@@ -43,12 +43,12 @@ services:
     replicaCount: 2
     image:
       repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/order-worker"
-      tag: "dev"
+      tag: "cd581dc4"
   frontend:
     replicaCount: 2
     image:
       repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/frontend"
-      tag: "dev"
+      tag: "cd581dc4"
     autoscaling:
       minReplicas: 2
       maxReplicas: 4
@@ -70,7 +70,7 @@ migration:
   enabled: true
   image:
     repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/db-migrator"
-    tag: "dev"
+    tag: "cd581dc4"
 
 keda:
   enabled: true
