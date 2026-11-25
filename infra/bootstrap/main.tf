@@ -147,6 +147,8 @@ data "aws_iam_policy_document" "github_assume_role" {
       values = distinct([
         "repo:${var.github_repo}:*",
         "repo:${lower(var.github_repo)}:*",
+        "repo:${split("/", var.github_repo)[0]}@*/${split("/", var.github_repo)[1]}@*:*",
+        "repo:${lower(split("/", var.github_repo)[0])}@*/${lower(split("/", var.github_repo)[1])}@*:*",
       ])
     }
   }
