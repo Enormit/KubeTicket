@@ -13,6 +13,11 @@ output "gitlab_ci_role_arn" {
   value       = var.enable_gitlab_oidc ? aws_iam_role.gitlab_ci[0].arn : null
 }
 
+output "github_ci_role_arn" {
+  description = "IAM Role ARN for GitHub Actions OIDC ECR push (null if enable_github_oidc=false)"
+  value       = var.enable_github_oidc ? aws_iam_role.github_ci[0].arn : null
+}
+
 output "backend_config_example" {
   description = "Paste into infra/envs/<env>/backend.tf"
   value       = <<-EOT

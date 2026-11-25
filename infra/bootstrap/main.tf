@@ -109,3 +109,59 @@ resource "aws_iam_role_policy_attachment" "gitlab_ecr" {
   role       = aws_iam_role.gitlab_ci[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
 }
+
+data "tls_certificate" "github" {
+  count = var.enable_github_oidc ? 1 : 0
+  url   = "https://token.actions.githubusercontent.com"
+}
+
+resource "aws_iam_openid_connect_provider" "github" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = [data.tls_certificate.github[0].certificates[0].sha1_fingerprint]
+}
+
+data "aws_iam_policy_document" "github_assume_role" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values = distinct([
+        "repo:${var.github_repo}:*",
+        "repo:${lower(var.github_repo)}:*",
+      ])
+    }
+  }
+}
+
+resource "aws_iam_role" "github_ci" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  name               = "${var.project_name}-github-ci-ecr"
+  assume_role_policy = data.aws_iam_policy_document.github_assume_role[0].json
+}
+
+resource "aws_iam_role_policy_attachment" "github_ecr" {
+  count = var.enable_github_oidc ? 1 : 0
+
+  role       = aws_iam_role.github_ci[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
+}

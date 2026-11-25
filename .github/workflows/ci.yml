@@ -1,0 +1,178 @@
+name: KubeTicket CI/CD (OIDC)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_DEFAULT_REGION: "ap-southeast-1"
+
+jobs:
+  test-go:
+    name: Go Vet & Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/go.work
+          cache-dependency-path: services/**/go.sum
+
+      - name: Run go vet and go test
+        run: |
+          go vet ./pkg/... ./gateway-api/... ./flashsale-engine/... ./order-worker/...
+          go test -v ./pkg/... ./gateway-api/... ./flashsale-engine/... ./order-worker/...
+
+  test-frontend:
+    name: Frontend Lint, Typecheck & Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install, lint, typecheck, and test
+        run: |
+          npm ci
+          npm run lint
+          npx tsc --noEmit
+          npm test
+
+  lint-helm:
+    name: Helm Chart Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.17.2"
+
+      - name: Lint Helm values (local, dev, prod)
+        run: |
+          helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-local.yaml
+          helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-dev.yaml
+          helm lint deploy/charts/kubeticket -f deploy/charts/kubeticket/values-prod.yaml
+
+  verify-aws-oidc:
+    name: Verify AWS OIDC Identity
+    needs: [test-go, test-frontend, lint-helm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check AWS_ROLE_ARN configuration
+        id: check_role
+        env:
+          ROLE_ARN: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -n "$ROLE_ARN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "AWS_ROLE_ARN secret/variable is not set in GitHub Settings; skipping live STS check."
+          fi
+
+      - name: Configure AWS credentials via GitHub OIDC
+        if: steps.check_role.outputs.configured == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Check AWS STS caller identity and ECR access
+        if: steps.check_role.outputs.configured == 'true'
+        run: |
+          aws sts get-caller-identity
+          aws ecr describe-repositories --region "$AWS_DEFAULT_REGION" --query 'repositories[*].repositoryName' --output text || true
+
+  build-and-push-ecr:
+    name: Build & Push Images to ECR
+    needs: [verify-aws-oidc]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.ECR_REGISTRY != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check AWS_ROLE_ARN configuration
+        env:
+          ROLE_ARN: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "AWS_ROLE_ARN secret/variable is required to push to ECR." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push service images
+        env:
+          ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          TAG="${SHORT_SHA::8}"
+          for svc in gateway-api flashsale-engine order-worker; do
+            IMAGE="$ECR_REGISTRY/kubeticket-dev/$svc"
+            docker build -f "services/$svc/Dockerfile" -t "$IMAGE:$TAG" -t "$IMAGE:dev" services/
+            docker push "$IMAGE:$TAG"
+            docker push "$IMAGE:dev"
+          done
+          FE_IMAGE="$ECR_REGISTRY/kubeticket-dev/frontend"
+          docker build -f frontend/Dockerfile -t "$FE_IMAGE:$TAG" -t "$FE_IMAGE:dev" frontend/
+          docker push "$FE_IMAGE:$TAG"
+          docker push "$FE_IMAGE:dev"
+
+  update-gitops-dev:
+    name: Update GitOps Dev Image Tags
+    needs: [build-and-push-ecr]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.ECR_REGISTRY != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITOPS_TOKEN || github.token }}
+
+      - name: Update values-dev.yaml image tags
+        env:
+          SHORT_SHA: ${{ github.sha }}
+        run: |
+          TAG="${SHORT_SHA::8}"
+          awk -v tag="$TAG" '
+            /kubeticket(-dev)?\/(gateway-api|flashsale-engine|order-worker|frontend)/ { update=1 }
+            update && /tag:/ { sub(/tag: ".*"/, "tag: \"" tag "\""); update=0 }
+            { print }
+          ' deploy/charts/kubeticket/values-dev.yaml > /tmp/values-dev.yaml
+          mv /tmp/values-dev.yaml deploy/charts/kubeticket/values-dev.yaml
+          git diff deploy/charts/kubeticket/values-dev.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/charts/kubeticket/values-dev.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(gitops): bump dev image tags to $TAG [skip ci]"
+            git push origin HEAD:main
+          fi

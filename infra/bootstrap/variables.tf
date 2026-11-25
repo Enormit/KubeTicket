@@ -33,3 +33,15 @@ variable "gitlab_project_path" {
   type        = string
   default     = "Enormit/kubeticket"
 }
+
+variable "enable_github_oidc" {
+  description = "Create an IAM OIDC provider and role for GitHub Actions keyless AWS authentication"
+  type        = bool
+  default     = false
+}
+
+variable "github_repo" {
+  description = "GitHub owner/repo allowed to assume the OIDC CI role"
+  type        = string
+  default     = "Enormit/KubeTicket"
+}
