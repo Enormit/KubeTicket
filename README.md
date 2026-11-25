@@ -594,6 +594,17 @@ Executed against `https://dev.enormitpham.me` (AWS EKS `kubeticket-dev-eks` on `
 | WebSocket (`wss://.../ws/events/...`) | `408` sessions (`100%` `101`) | `7,489` delta messages (`24.82/s`), `ws_connecting p95 = 311.34 ms`, `8` concurrent active sockets |
 | EKS Peak Utilization (`kubectl top`) | Nodes `13%` & `7%` CPU | Memory `76%` (`2507Mi`) & `62%` (`2055Mi`); HPA `gateway-api` peaked at `41%/70%` CPU (`2/4` pods) |
 
-> **Note on Grafana `HTTP 5xx Error Rate (%)`:** The panel displays `No data` because zero HTTP `5xx` responses occurred during the test (`http_requests_total{status=~"5.."}` has no emitted time series).
+> **Note on Grafana `HTTP 5xx Error Rate (%)`:** In the first capture below, the panel showed `No data` because zero HTTP `5xx` responses occurred; the PromQL query in `deploy/monitoring/grafana-dashboard-kubeticket.json` was subsequently updated to fall back to `0%` (shown in the scaling benchmark screenshots below).
 
 ![KubeTicket EKS Dev Grafana 5-Minute Load Test](./Screenshot.png)
+
+### Live Autoscaling Verification (EKS HPA + KEDA SQS FIFO, 3 Spot Nodes)
+
+Scaled `kubeticket-dev-workers` to `3x t3.medium` Spot nodes and wired KEDA `TriggerAuthentication` (`podIdentity.provider: aws`, `identityOwner: keda`) with dedicated IAM role `kubeticket-dev-keda-operator`:
+
+- **HPA CPU Scale-Out (`kubeticket-dev-gateway-api`):** Burst of **`95` concurrent VUs** (`50` browse, `10` WS, `35` rush over `100s` -> `19,038` HTTP requests at **`170.61 req/s`**, `10,758` iterations, `http_req_failed = 1.26%`, **`p95 = 117.25 ms`**, `0` server `5xx` errors). `gateway-api` CPU hit `170%/70%`, triggering `SuccessfulRescale: New size: 4` (`2 -> 4` pods) within 60s.
+- **KEDA Event-Driven SQS Scale-Out (`kubeticket-dev-order-worker`):** Burst of **`1,500` SQS FIFO messages** across 30 FIFO message groups triggered KEDA external metric `s0-aws-sqs-kubeticket-dev-orders-fifo` (`queueLength: 5`), issuing `SuccessfulRescale: New size: 2` (`1 -> 2` pods) and driving `~26 ops/s` queue processing throughput with `Go Runtime Goroutines` (`10–21` per pod) and `Process Resident Memory` (`22–28 MiB` RSS) visible across all 8 Go pods.
+
+![KubeTicket EKS Scaling Burst & KEDA SQS Throughput](./Screenshot-scaling.jpg)
+
+![KubeTicket Go Runtime Goroutines & RSS Across Scaled Pods](./Screenshot-runtime.png)
