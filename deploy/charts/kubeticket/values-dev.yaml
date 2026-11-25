@@ -74,7 +74,7 @@ migration:
     tag: "cd581dc4"
 
 keda:
-  enabled: true
+  enabled: false # Requires a dedicated IAM role + TriggerAuthentication for keda-operator
   minReplicaCount: 1
   maxReplicaCount: 6
   sqs:

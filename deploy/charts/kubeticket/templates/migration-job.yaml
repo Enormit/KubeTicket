@@ -1,10 +1,11 @@
 {{- if .Values.migration.enabled }}
 {{- $fullname := include "kubeticket.fullname" . }}
 {{- $secretName := include "kubeticket.secretName" . }}
+{{- $migHash := printf "%s:%s:%v" .Values.migration.image.repository .Values.migration.image.tag (.Values.migration.seedEnabled | default false) | sha256sum | trunc 8 }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $fullname }}-db-migrate-{{ .Release.Revision }}
+  name: {{ $fullname }}-db-migrate-{{ $migHash }}
   labels:
     {{- include "kubeticket.labels" . | nindent 4 }}
     app.kubernetes.io/component: db-migrate
