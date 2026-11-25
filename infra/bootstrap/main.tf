@@ -54,12 +54,17 @@ resource "aws_dynamodb_table" "locks" {
   }
 }
 
+data "tls_certificate" "gitlab" {
+  count = var.enable_gitlab_oidc ? 1 : 0
+  url   = "https://gitlab.com"
+}
+
 resource "aws_iam_openid_connect_provider" "gitlab" {
   count = var.enable_gitlab_oidc ? 1 : 0
 
   url             = "https://gitlab.com"
   client_id_list  = ["https://gitlab.com"]
-  thumbprint_list = ["b3dd7606d2b5a8b4a13771dbecc9ee1becafa38a"]
+  thumbprint_list = [data.tls_certificate.gitlab[0].certificates[0].sha1_fingerprint]
 }
 
 data "aws_iam_policy_document" "gitlab_assume_role" {
@@ -83,7 +88,10 @@ data "aws_iam_policy_document" "gitlab_assume_role" {
     condition {
       test     = "StringLike"
       variable = "gitlab.com:sub"
-      values   = ["project_path:${var.gitlab_project_path}:ref_type:branch:ref:*"]
+      values = distinct([
+        "project_path:${var.gitlab_project_path}:ref_type:*",
+        "project_path:${lower(var.gitlab_project_path)}:ref_type:*",
+      ])
     }
   }
 }
