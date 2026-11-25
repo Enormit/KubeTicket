@@ -68,6 +68,7 @@ ingress:
 
 migration:
   enabled: true
+  seedEnabled: true
   image:
     repository: "755272426779.dkr.ecr.ap-southeast-1.amazonaws.com/kubeticket-dev/db-migrator"
     tag: "cd581dc4"
